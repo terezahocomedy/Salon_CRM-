@@ -76,6 +76,60 @@ const parsePriceRobust = (val) => val ? (isNaN(Number(String(val).replace(/[^0-9
 const cleanStylistName = (name) => name ? String(name).trim() : 'Others';
 const cleanPhone = (phone) => String(phone || '').replace(/\D/g, '');
 
+const MENU_CATEGORIES = [
+  {
+    title: '剪髮與洗護 (Cut & Wash)',
+    icon: '✂️',
+    items: [
+      { name: 'Hair Cut & Shampoo (洗剪)', price: 350 }, // Popular 1
+      { name: 'Shampoo & Blow (洗吹)', price: 180 }, // Popular 2
+      { name: 'Hair Cut Only (單剪)', price: 300 },
+      { name: 'Kids Hair Cut (兒童剪髮)', price: 280 },
+      { name: 'Hair Updo (造型設計)', price: 0 }
+    ]
+  },
+  {
+    title: '電髮 (Perm)',
+    icon: '🌀',
+    items: [
+      { name: 'Full Perm S (全頭電髮 短)', price: 800 }, // Popular 1
+      { name: 'Digital Perm M (電直/捲 中)', price: 1300 }, // Popular 2
+      { name: 'Full Perm M (全頭電髮 中)', price: 1000 },
+      { name: 'Full Perm L (全頭電髮 長)', price: 1300 },
+      { name: 'Partial Perm (局部電髮)', price: 700 },
+      { name: 'Digital Perm L (電直/捲 長)', price: 1600 }
+    ]
+  },
+  {
+    title: '染髮 (Coloring)',
+    icon: '🎨',
+    items: [
+      { name: 'Root Touch Up (補染髮根)', price: 600 }, // Popular 1
+      { name: 'Single Color M (全頭染 中)', price: 750 }, // Popular 2
+      { name: 'Single Color S (全頭染 短)', price: 650 },
+      { name: 'Single Color L (全頭染 長)', price: 850 },
+      { name: 'Bleach S (漂染 短)', price: 850 },
+      { name: 'Bleach M (漂染 中)', price: 1050 },
+      { name: 'Balayage/Highlight (手掃/創意挑染)', price: 1400 },
+      { name: 'Partial Highlight (局部挑染)', price: 700 },
+      { name: 'O-WAY Organic S (有機染 短)', price: 850 },
+      { name: 'Grey Blending (遮白融合)', price: 700 }
+    ]
+  },
+  {
+    title: '護髮與頭皮 (Treatment)',
+    icon: '💆',
+    items: [
+      { name: 'Tokio Hair Spa (京喚羽極致修護)', price: 900 }, // Popular 1
+      { name: 'Keratin Straight M (角蛋白順髮 中)', price: 1800 }, // Popular 2
+      { name: 'Tokio Head Spa (京喚羽頭皮護理)', price: 850 },
+      { name: 'WEBOND (結構修護)', price: 600 },
+      { name: 'Davines Scalp (去屑/防脫護理)', price: 650 },
+      { name: 'Keratin Straight S (角蛋白順髮 短)', price: 1400 }
+    ]
+  }
+];
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('checkout'); 
   const [crmSortBy, setCrmSortBy] = useState('latestVisit'); 
@@ -89,9 +143,9 @@ export default function App() {
   const [editModal, setEditModal] = useState(null); 
   const [profileEditData, setProfileEditData] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null);
-  const [showServicesConfig, setShowServicesConfig] = useState(false);
   const [showTagsConfig, setShowTagsConfig] = useState(false);
   const [isProfileExpanded, setIsProfileExpanded] = useState(false);
+  const [expandedServiceCats, setExpandedServiceCats] = useState({});
   
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showNameSuggest, setShowNameSuggest] = useState(false);
@@ -120,7 +174,6 @@ export default function App() {
   const [dashboardDateRef, setDashboardDateRef] = useState(getHKTNow());
   const [dashboardStartDate, setDashboardStartDate] = useState('');
   const [dashboardEndDate, setDashboardEndDate] = useState('');
-  const [hairServices, setHairServices] = useState(() => JSON.parse(localStorage.getItem('headline_services_v11') || JSON.stringify(defaultServices)));
   const [interestTags, setInterestTags] = useState(() => JSON.parse(localStorage.getItem('headline_tags_v1') || JSON.stringify(['白頭髮遮蓋', '想試染髮', '有機/天然品牌', '縮毛矯正', '受損髮質修護'])));
   const [showRetailSection, setShowRetailSection] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
@@ -137,14 +190,13 @@ export default function App() {
   const safeRawRecords = useMemo(() => rawHistoryRecords, [rawHistoryRecords]);
   const historyRecords = useMemo(() => { return rawHistoryRecords.map(r => ({...r, stylist: r.stylist ? String(r.stylist).trim() : 'Unknown', price: Number(String(r.price).replace(/[^0-9.-]+/g, "")) || 0})); }, [rawHistoryRecords]);
 
-  const getInitialForm = () => ({ customerId: '', clientType: 'New', sourceDetail: 'Walk-in', referredBy: '', language: '中文', stylist: 'Man', firstName: '', lastName: '', gender: 'Female', phonePrefix: '+852', phone: '', email: '', birthMonth: '', customerSource: '熟客 (Regular)', date: getHKTDateString(), selectedServices: [], customService: '', retailItems: '', retailPrice: '', subtotal: '', discountPct: '0', price: '', paymentMethod: 'Cash', formula: '', interests: [], photoLink: '', serviceId: '', _eventId: null, _stylist: null, marketingConsent: 'Opt-out', consentTimestamp: '' });
+  const getInitialForm = () => ({ customerId: '', clientType: 'New', sourceDetail: 'Walk-in', referredBy: '', language: '中文', stylist: 'Man', firstName: '', lastName: '', gender: 'Female', phonePrefix: '+852', phone: '', email: '', birthMonth: '', customerSource: '熟客 (Regular)', date: getHKTDateString(), selectedServices: [], customService: '', customServicePrice: '', retailItems: '', retailPrice: '', subtotal: '', discountPct: '0', price: '', paymentMethod: 'Cash', formula: '', interests: [], photoLink: '', serviceId: '', _eventId: null, _stylist: null, marketingConsent: 'Opt-out', consentTimestamp: '' });
 
   const [formData, setFormData] = useState(getInitialForm());
   const [submitting, setSubmitting] = useState(false);
   const activeTheme = STYLIST_THEMES[formData.stylist] || STYLIST_THEMES['Man'];
 
   useEffect(() => { const interval = setInterval(() => setCurrentTime(getHKTNow()), 60000); return () => clearInterval(interval); }, []);
-  useEffect(() => { localStorage.setItem('headline_services_v11', JSON.stringify(hairServices)); }, [hairServices]);
   useEffect(() => { localStorage.setItem('headline_tags_v1', JSON.stringify(interestTags)); }, [interestTags]);
   useEffect(() => { localStorage.setItem('headline_drive_api_v13_9', driveApiUrl); }, [driveApiUrl]);
   useEffect(() => { localStorage.setItem('headline_calendar_api_v13_9', calendarApiUrl); }, [calendarApiUrl]);
@@ -214,6 +266,29 @@ export default function App() {
   const triggerNotification = (msg) => { setNotification(msg); setTimeout(() => setNotification(null), 3000); };
   const handleTabChange = (tab) => { playAudioFeedback('click'); setActiveTab(tab); if(tab !== 'datahub') setDataHubUnlocked(false); setIsProfileExpanded(false); };
   const handleInputChange = (field, value) => setFormData(prev => ({ ...prev, [field]: value }));
+  
+  const toggleServiceItem = (serviceObj) => { 
+    playAudioFeedback('click'); 
+    setFormData(prev => {
+        const isSelected = prev.selectedServices.some(s => s.name === serviceObj.name);
+        let newSelected = [];
+        let subtotalModifier = serviceObj.price;
+
+        if (isSelected) {
+            newSelected = prev.selectedServices.filter(s => s.name !== serviceObj.name);
+            subtotalModifier = -serviceObj.price;
+        } else {
+            newSelected = [...prev.selectedServices, serviceObj];
+        }
+
+        // Calculate new subtotal directly, handling empty strings safely
+        let currentSubtotal = parseInt(prev.subtotal) || 0;
+        let newSubtotal = Math.max(0, currentSubtotal + subtotalModifier);
+
+        return { ...prev, selectedServices: newSelected, subtotal: newSubtotal > 0 ? String(newSubtotal) : '' };
+    }); 
+  };
+  
   const toggleArrayItem = (f, i) => { playAudioFeedback('click'); setFormData(p => ({ ...p, [f]: (p[f]||[]).includes(i) ? p[f].filter(s=>s!==i) : [...(p[f]||[]), i] })); };
 
   useEffect(() => {
@@ -532,7 +607,6 @@ const trafficChartData = useMemo(() => {
     if (!formData.price || parseInt(formData.price) <= 0) return triggerNotification('請輸入有效金額！');
     if (isUploadingPhoto) { playAudioFeedback('warn'); return triggerNotification('⏳ 圖片上傳中，請稍候再儲存或先取消上傳！'); }
     
-    // Final duplicate check just before submission to be strictly safe
     const finalCustomerId = formData.clientType === 'New' || !formData.customerId ? getNextCustomerId(rawHistoryRecords) : formData.customerId;
     const cleanInputPhone = cleanPhone(formData.phone);
     if (cleanInputPhone.length >= 5) {
@@ -547,7 +621,10 @@ const trafficChartData = useMemo(() => {
     setSubmitting(true);
     const currentServiceId = formData.serviceId || generateServiceId(formData.date, safeRawRecords);
     
-    const finalRecord = { ...formData, firstName: formData.firstName.trim(), lastName: '', name: formData.firstName.trim(), customerId: finalCustomerId, serviceId: currentServiceId, customerSource: formData.clientType === 'New' ? `新客 (${formData.sourceDetail})` : (formData.clientType === 'Repeated' && !formData.customerId ? '舊客 (數位首建)' : '舊客 (Repeated)'), services: [...formData.selectedServices, formData.customService].filter(Boolean).join(', '), interests: formData.interests.join(', '), isProfileOnly: false, timestamp: getHKTNow().toISOString() };
+    const formattedSelectedServices = formData.selectedServices.map(s => s.name);
+    const formattedCustomService = formData.customServicePrice ? `${formData.customService} ($${formData.customServicePrice})` : formData.customService;
+    
+    const finalRecord = { ...formData, firstName: formData.firstName.trim(), lastName: '', name: formData.firstName.trim(), customerId: finalCustomerId, serviceId: currentServiceId, customerSource: formData.clientType === 'New' ? `新客 (${formData.sourceDetail})` : (formData.clientType === 'Repeated' && !formData.customerId ? '舊客 (數位首建)' : '舊客 (Repeated)'), services: [...formattedSelectedServices, formattedCustomService].filter(Boolean).join(', '), interests: formData.interests.join(', '), isProfileOnly: false, timestamp: getHKTNow().toISOString() };
 
     setTimeout(() => {
       setRawHistoryRecords(prev => [finalRecord, ...prev]);
@@ -614,7 +691,7 @@ const trafficChartData = useMemo(() => {
         <div className="flex items-center space-x-4 md:space-x-8 w-full justify-between">
           <div className="flex flex-col items-start justify-center select-none pt-1">
             <h1 className="text-2xl md:text-3xl font-bold tracking-[0.2em] leading-none text-[#4A2511] flex items-center">
-              HEADLINE <span className="text-[10px] md:text-xs font-bold text-emerald-600 tracking-normal ml-2 md:ml-3 mt-1 bg-emerald-50 px-1.5 md:px-2 py-0.5 rounded border border-emerald-200">v14.9 Mobile</span>
+              HEADLINE <span className="text-[10px] md:text-xs font-bold text-emerald-600 tracking-normal ml-2 md:ml-3 mt-1 bg-emerald-50 px-1.5 md:px-2 py-0.5 rounded border border-emerald-200">v14.11 Mobile</span>
             </h1>
             <span className="text-[10px] md:text-xs tracking-[0.4em] uppercase mt-1 font-semibold text-gray-500">Hair Salon</span>
           </div>
@@ -937,16 +1014,77 @@ const trafficChartData = useMemo(() => {
                    </div>
 
                    <div className="mb-4 md:mb-6">
-                     <h3 className="text-[10px] md:text-sm font-bold uppercase tracking-widest text-gray-500 mb-2 md:mb-3 flex justify-between items-center"><span>服務項目 (Services)</span><button type="button" onClick={()=>setShowServicesConfig(true)} className="text-blue-500 hover:text-blue-600 font-bold bg-blue-50 px-2 py-1 rounded">管理清單</button></h3>
-                     <div className="flex flex-wrap gap-2 mb-3">
-                       {hairServices.map(service => (
-                         <label key={service} className="cursor-pointer">
-                            <input type="checkbox" className="hidden" checked={formData.selectedServices.includes(service)} onChange={() => toggleArrayItem('selectedServices', service)}/>
-                            <div className={`py-2 px-3 md:py-3 md:px-4 rounded-2xl text-sm md:text-base font-bold border-2 transition-all ${formData.selectedServices.includes(service) ? 'shadow-md text-white' : 'bg-white border-transparent text-gray-600 hover:bg-[#E8DCC8]'}`} style={formData.selectedServices.includes(service) ? { backgroundColor: activeTheme.hex, borderColor: activeTheme.hex } : {}}>{service}</div>
-                         </label>
-                       ))}
+                     <h3 className="text-[10px] md:text-sm font-bold uppercase tracking-widest text-gray-500 mb-3 md:mb-4 flex items-center"><span>服務項目 (Services Menu)</span><span className="ml-2 text-xs font-normal lowercase bg-gray-100 px-2 py-0.5 rounded text-gray-400">auto-sums to subtotal</span></h3>
+                     
+                     {}
+                     <div className="space-y-3 md:space-y-4">
+                       {MENU_CATEGORIES.map((category, idx) => {
+                         const restItems = category.items.slice(2);
+                         const hasHiddenSelection = restItems.some(item => formData.selectedServices.some(s => s.name === item.name));
+                         const isExpanded = expandedServiceCats[category.title] || hasHiddenSelection;
+                         const topItems = category.items.slice(0, 2);
+
+                         const renderServiceButton = (service) => {
+                           const isSelected = formData.selectedServices.some(s => s.name === service.name);
+                           return (
+                             <button
+                               key={service.name}
+                               type="button"
+                               onClick={() => toggleServiceItem(service)}
+                               className={`flex flex-col items-start justify-center py-2 px-3 md:py-2.5 md:px-4 rounded-xl border-2 transition-all text-left group w-full md:w-auto ${isSelected ? 'shadow-md text-white' : 'bg-gray-50 border-transparent hover:bg-[#F6EFE9] text-gray-600'}`}
+                               style={isSelected ? { backgroundColor: activeTheme.hex, borderColor: activeTheme.hex } : {}}
+                             >
+                               <span className="text-[10px] md:text-sm font-bold leading-tight">{service.name}</span>
+                               {service.price > 0 ? (
+                                  <span className={`text-[9px] md:text-xs font-black mt-0.5 ${isSelected ? 'text-white/80' : 'text-gray-400 group-hover:text-[#8B5A2B]'}`}>${service.price}</span>
+                               ) : (
+                                  <span className={`text-[9px] md:text-xs font-bold mt-0.5 ${isSelected ? 'text-white/80' : 'text-gray-400 group-hover:text-[#8B5A2B]'}`}>By Consult</span>
+                               )}
+                             </button>
+                           )
+                         };
+
+                         return (
+                           <div key={idx} className="bg-white p-3 md:p-4 rounded-2xl border border-[#E8DCC8] shadow-sm">
+                             <div className="flex justify-between items-center mb-2 md:mb-3">
+                               <h4 className="text-xs md:text-sm font-black text-[#8B5A2B] flex items-center gap-1.5"><span className="text-base">{category.icon}</span> {category.title}</h4>
+                               {restItems.length > 0 && (
+                                   <button type="button" onClick={() => { playAudioFeedback('click'); setExpandedServiceCats(prev => ({...prev, [category.title]: !isExpanded})) }} className="text-[10px] md:text-xs font-bold text-gray-500 bg-gray-100 hover:bg-gray-200 px-2 py-1 md:px-3 md:py-1.5 rounded-lg flex items-center gap-1 transition-colors">
+                                       {isExpanded ? <><Icons.Minus className="w-3 h-3 md:w-4 md:h-4"/> <span className="hidden sm:inline-block">收起 (Less)</span><span className="sm:hidden">收起</span></> : <><Icons.Plus className="w-3 h-3 md:w-4 md:h-4"/> <span className="hidden sm:inline-block">顯示全部 ({restItems.length})</span><span className="sm:hidden">全部</span></>}
+                                   </button>
+                               )}
+                             </div>
+                             
+                             <div className="grid grid-cols-2 md:flex md:flex-wrap gap-2 md:gap-3">
+                               {topItems.map(service => renderServiceButton(service))}
+                             </div>
+
+                             {isExpanded && restItems.length > 0 && (
+                               <div className="grid grid-cols-2 md:flex md:flex-wrap gap-2 md:gap-3 mt-2 md:mt-3 pt-2 md:pt-3 border-t border-gray-100 animate-in fade-in slide-in-from-top-2">
+                                 {restItems.map(service => renderServiceButton(service))}
+                               </div>
+                             )}
+                           </div>
+                         )
+                       })}
                      </div>
-                     <input type="text" placeholder="+ 其他客製服務或套餐名稱..." value={formData.customService} onChange={(e) => handleInputChange('customService', e.target.value)} className="w-full bg-white border-transparent rounded-2xl py-3 px-4 text-base md:text-lg font-bold outline-none focus:border-[#8B5A2B] border-2 transition-colors shadow-sm" />
+                     
+                     <div className="mt-4 flex gap-2 md:gap-3 bg-white p-2 md:p-3 rounded-2xl border border-[#E8DCC8] shadow-sm items-center">
+                         <div className="shrink-0 pl-2 text-xl">➕</div>
+                         <input type="text" placeholder="輸入其他客製化服務..." value={formData.customService} onChange={(e) => handleInputChange('customService', e.target.value)} className="flex-1 bg-gray-50 border-transparent rounded-xl py-2 md:py-3 px-3 md:px-4 text-sm md:text-base font-bold outline-none focus:border-[#8B5A2B] border-2 transition-colors" />
+                         <div className="flex items-center gap-1">
+                             <span className="text-gray-400 font-bold text-sm">$</span>
+                             <input type="number" placeholder="金額..." value={formData.customServicePrice} onChange={(e) => { 
+                                 const val = e.target.value;
+                                 const diff = (parseInt(val) || 0) - (parseInt(formData.customServicePrice) || 0);
+                                 handleInputChange('customServicePrice', val); 
+                                 // Smart auto-update subtotal when custom price changes manually
+                                 if(val && formData.customService) {
+                                     setFormData(prev => ({ ...prev, subtotal: String(Math.max(0, (parseInt(prev.subtotal) || 0) + diff)) }));
+                                 }
+                             }} className="w-[80px] md:w-[100px] bg-gray-50 border-transparent rounded-xl py-2 md:py-3 px-2 md:px-3 text-sm md:text-base font-bold outline-none focus:border-[#8B5A2B] border-2 transition-colors" />
+                         </div>
+                     </div>
                    </div>
 
                    <div className="bg-white rounded-3xl p-4 md:p-5 mb-4 md:mb-6 shadow-sm border border-[#E8DCC8]">
@@ -1585,7 +1723,13 @@ const trafficChartData = useMemo(() => {
                      <div>
                          <label className="block text-[10px] md:text-xs font-bold mb-1 text-gray-500">服務內容</label>
                          <select required value={schedAddEditModal.service} onChange={e=>{ const svc = e.target.value; setSchedAddEditModal({...schedAddEditModal, service: svc, duration: SERVICE_DURATIONS[svc] || 60}); }} className="w-full bg-[#F6EFE9] rounded-xl py-2.5 md:py-3 px-3 md:px-4 font-bold outline-none cursor-pointer text-sm md:text-base">
-                             <option value="">- 選擇服務項目 -</option>{hairServices.map(s => <option key={s} value={s}>{s}</option>)}<option value="其他客製服務">其他客製服務</option>
+                             <option value="">- 選擇服務項目 -</option>
+                             {MENU_CATEGORIES.map(category => (
+                                 <optgroup key={category.title} label={category.title}>
+                                     {category.items.map(s => <option key={s.name} value={s.name}>{s.name} {s.price>0?`($${s.price})`:''}</option>)}
+                                 </optgroup>
+                             ))}
+                             <option value="其他客製服務">其他客製服務</option>
                          </select>
                      </div>
                      <div className="grid grid-cols-2 gap-2 md:gap-3">
@@ -1643,20 +1787,7 @@ const trafficChartData = useMemo(() => {
         </div>
       )}
 
-      {showServicesConfig && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[200] p-4">
-            <div className="bg-white rounded-[1.5rem] md:rounded-[2rem] max-w-sm w-full p-6 md:p-8 shadow-2xl animate-in zoom-in-95">
-                <div className="flex justify-between items-center mb-4 md:mb-6"><h3 className="text-lg md:text-xl font-black text-[#4A2511]">管理服務清單</h3><button onClick={() => setShowServicesConfig(false)} className="text-gray-400 hover:text-gray-800"><Icons.X/></button></div>
-                <div className="space-y-1.5 md:space-y-2 max-h-[250px] md:max-h-[300px] overflow-y-auto mb-3 md:mb-4 custom-scrollbar">
-                    {hairServices.map((svc, idx) => ( <div key={idx} className="flex justify-between items-center bg-gray-50 p-2 md:p-3 rounded-lg md:rounded-xl"><span className="font-bold text-gray-700 text-xs md:text-sm">{svc}</span><button onClick={() => setHairServices(hairServices.filter(s => s !== svc))} className="text-red-400 hover:text-red-600"><Icons.Trash className="w-3 h-3 md:w-4 md:h-4" /></button></div> ))}
-                </div>
-                <form onSubmit={(e) => { e.preventDefault(); const val = (e.target as any).newSvc.value.trim(); if(val && !hairServices.includes(val)) { setHairServices([...hairServices, val]); (e.target as any).newSvc.value = ''; } }} className="flex gap-2">
-                    <input type="text" name="newSvc" placeholder="新增服務名稱..." className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 outline-none font-bold text-sm md:text-base" />
-                    <button type="submit" className="bg-[#8B5A2B] text-white px-3 md:px-4 py-2 rounded-xl font-bold"><Icons.Plus className="w-4 h-4 md:w-5 md:h-5" /></button>
-                </form>
-            </div>
-        </div>
-      )}
+      {}
 
       {editModal && (
         <div className="fixed inset-0 bg-[#4A2511]/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
