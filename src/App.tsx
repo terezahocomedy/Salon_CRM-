@@ -41,6 +41,10 @@ const defaultServices = Object.keys(SERVICE_DURATIONS);
 const birthMonthsList = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月','不提供'];
 const TIME_SLOTS = Array.from({length: 21}, (_, i) => `${Math.floor(i / 2) + 10}:${i % 2 === 0 ? '00' : '30'}`);
 
+// HKT Time Helpers
+const getHKTNow = () => new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Hong_Kong" }));
+const getHKTDateString = () => { const d = getHKTNow(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+
 let audioCtx = null;
 const playAudioFeedback = (type) => {
   try {
@@ -94,6 +98,7 @@ export default function App() {
   const [nameSuggests, setNameSuggests] = useState([]);
   const [duplicatePhonePrompt, setDuplicatePhonePrompt] = useState(null);
   
+  const [dashboardGlobalStylist, setDashboardGlobalStylist] = useState('All');
   const [trafficFilterStylist, setTrafficFilterStylist] = useState('All');
   const [transactionSortOrder, setTransactionSortOrder] = useState('desc');
 
@@ -103,16 +108,16 @@ export default function App() {
   const [calendarEvents, setCalendarEvents] = useState([]);
   const [isCalendarLoading, setIsCalendarLoading] = useState(false);
   const [schedViewMode, setSchedViewMode] = useState('day'); 
-  const [schedSelectedDate, setSchedSelectedDate] = useState(new Date());
+  const [schedSelectedDate, setSchedSelectedDate] = useState(getHKTNow());
   const [schedDetailModal, setSchedDetailModal] = useState(null);
   const [schedAddEditModal, setSchedAddEditModal] = useState(null);
   const [showSchedNameSuggest, setShowSchedNameSuggest] = useState(false);
   const [schedNameSuggests, setSchedNameSuggests] = useState([]);
   const [schedFilterStylist, setSchedFilterStylist] = useState('All');
-  const [currentTime, setCurrentTime] = useState(new Date());
+  const [currentTime, setCurrentTime] = useState(getHKTNow());
 
   const [dashboardPeriod, setDashboardPeriod] = useState('month');
-  const [dashboardDateRef, setDashboardDateRef] = useState(new Date());
+  const [dashboardDateRef, setDashboardDateRef] = useState(getHKTNow());
   const [dashboardStartDate, setDashboardStartDate] = useState('');
   const [dashboardEndDate, setDashboardEndDate] = useState('');
   const [hairServices, setHairServices] = useState(() => JSON.parse(localStorage.getItem('headline_services_v11') || JSON.stringify(defaultServices)));
@@ -132,13 +137,13 @@ export default function App() {
   const safeRawRecords = useMemo(() => rawHistoryRecords, [rawHistoryRecords]);
   const historyRecords = useMemo(() => { return rawHistoryRecords.map(r => ({...r, stylist: r.stylist ? String(r.stylist).trim() : 'Unknown', price: Number(String(r.price).replace(/[^0-9.-]+/g, "")) || 0})); }, [rawHistoryRecords]);
 
-  const getInitialForm = () => ({ customerId: '', clientType: 'New', sourceDetail: 'Walk-in', referredBy: '', language: '中文', stylist: 'Man', firstName: '', lastName: '', gender: 'Female', phonePrefix: '+852', phone: '', email: '', birthMonth: '', customerSource: '熟客 (Regular)', date: new Date().toISOString().split('T')[0], selectedServices: [], customService: '', retailItems: '', retailPrice: '', subtotal: '', discountPct: '0', price: '', paymentMethod: 'Cash', formula: '', interests: [], photoLink: '', serviceId: '', _eventId: null, _stylist: null, marketingConsent: 'Opt-out', consentTimestamp: '' });
+  const getInitialForm = () => ({ customerId: '', clientType: 'New', sourceDetail: 'Walk-in', referredBy: '', language: '中文', stylist: 'Man', firstName: '', lastName: '', gender: 'Female', phonePrefix: '+852', phone: '', email: '', birthMonth: '', customerSource: '熟客 (Regular)', date: getHKTDateString(), selectedServices: [], customService: '', retailItems: '', retailPrice: '', subtotal: '', discountPct: '0', price: '', paymentMethod: 'Cash', formula: '', interests: [], photoLink: '', serviceId: '', _eventId: null, _stylist: null, marketingConsent: 'Opt-out', consentTimestamp: '' });
 
   const [formData, setFormData] = useState(getInitialForm());
   const [submitting, setSubmitting] = useState(false);
   const activeTheme = STYLIST_THEMES[formData.stylist] || STYLIST_THEMES['Man'];
 
-  useEffect(() => { const interval = setInterval(() => setCurrentTime(new Date()), 60000); return () => clearInterval(interval); }, []);
+  useEffect(() => { const interval = setInterval(() => setCurrentTime(getHKTNow()), 60000); return () => clearInterval(interval); }, []);
   useEffect(() => { localStorage.setItem('headline_services_v11', JSON.stringify(hairServices)); }, [hairServices]);
   useEffect(() => { localStorage.setItem('headline_tags_v1', JSON.stringify(interestTags)); }, [interestTags]);
   useEffect(() => { localStorage.setItem('headline_drive_api_v13_9', driveApiUrl); }, [driveApiUrl]);
@@ -192,7 +197,7 @@ export default function App() {
   }, []);
 
   const generateServiceId = (dateStr, records = []) => {
-    const d = dateStr ? new Date(dateStr) : new Date();
+    const d = dateStr ? new Date(dateStr) : getHKTNow();
     const yy = String(d.getFullYear()).slice(-2);
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     const dd = String(d.getDate()).padStart(2, '0');
@@ -311,14 +316,16 @@ export default function App() {
     const prevRange = dashboardPeriod !== 'custom' ? getPeriodRange(dashboardPeriod, dashboardDateRef, -1) : null;
 
     const getMetrics = (start, end) => {
-        const records = historyRecords.filter(r => !r.isProfileOnly && new Date(parseDateFlexible(r.date)) >= start && new Date(parseDateFlexible(r.date)) <= end);
+        const records = historyRecords.filter(r => !r.isProfileOnly && new Date(parseDateFlexible(r.date)) >= start && new Date(parseDateFlexible(r.date)) <= end && (dashboardGlobalStylist === 'All' || cleanStylistName(r.stylist) === dashboardGlobalStylist));
         let m = { rev: 0, clients: records.length, retail: 0, newCus: 0, male: 0, female: 0, en: 0, cn: 0, zh: 0 };
         let dailyMap = {}, serviceMap = {}, stylistMap = { Man: { revenue: 0, count: 0 }, Becky: { revenue: 0, count: 0 }, Sammy: { revenue: 0, count: 0 }, Others: { revenue: 0, count: 0 } }, sourceMap = {};
         
         let globalReferralMap = {}; 
         let refTotal = 0, refRev = 0;
         
-        historyRecords.forEach(r => {
+        const stylistFilteredHistory = dashboardGlobalStylist === 'All' ? historyRecords : historyRecords.filter(r => cleanStylistName(r.stylist) === dashboardGlobalStylist);
+        
+        stylistFilteredHistory.forEach(r => {
             if (r.customerSource?.includes('Referral') || r.customerSource?.includes('朋友介紹') || (r.referredBy && r.referredBy.trim() !== '')) {
                 refTotal++; refRev += r.price;
                 if (r.referredBy && r.referredBy.trim()) {
@@ -377,11 +384,11 @@ export default function App() {
         retailPct: curr.rev ? ((curr.retail / curr.rev) * 100).toFixed(1) : 0,
         malePct: curr.clients ? ((curr.male / curr.clients) * 100).toFixed(0) : 0, femalePct: curr.clients ? ((curr.female / curr.clients) * 100).toFixed(0) : 0,
         enPct: (curr.en+curr.zh) ? ((curr.en / (curr.en+curr.zh)) * 100).toFixed(0) : 0, zhPct: (curr.en+curr.zh) ? ((curr.zh / (curr.en+curr.zh)) * 100).toFixed(0) : 0, 
-        newCusPct: curr.clients ? ((curr.newCus / curr.clients) * 100).toFixed(0) : 0, retCusPct: curr.clients ? (((curr.clients - curr.newCus) / curr.clients) * 100).toFixed(0) : 0,
-    };
-  }, [historyRecords, dashboardPeriod, dashboardDateRef, dashboardStartDate, dashboardEndDate]);
+    newCusPct: curr.clients ? ((curr.newCus / curr.clients) * 100).toFixed(0) : 0, retCusPct: curr.clients ? (((curr.clients - curr.newCus) / curr.clients) * 100).toFixed(0) : 0,
+  };
+}, [historyRecords, dashboardPeriod, dashboardDateRef, dashboardStartDate, dashboardEndDate, dashboardGlobalStylist]);
 
-  const trafficChartData = useMemo(() => {
+const trafficChartData = useMemo(() => {
     let dailyMap = {};
     (dashboardData.records || []).forEach(r => {
         const sty = cleanStylistName(r.stylist);
@@ -540,7 +547,7 @@ export default function App() {
     setSubmitting(true);
     const currentServiceId = formData.serviceId || generateServiceId(formData.date, safeRawRecords);
     
-    const finalRecord = { ...formData, firstName: formData.firstName.trim(), lastName: '', name: formData.firstName.trim(), customerId: finalCustomerId, serviceId: currentServiceId, customerSource: formData.clientType === 'New' ? `新客 (${formData.sourceDetail})` : (formData.clientType === 'Repeated' && !formData.customerId ? '舊客 (數位首建)' : '舊客 (Repeated)'), services: [...formData.selectedServices, formData.customService].filter(Boolean).join(', '), interests: formData.interests.join(', '), isProfileOnly: false, timestamp: new Date().toISOString() };
+    const finalRecord = { ...formData, firstName: formData.firstName.trim(), lastName: '', name: formData.firstName.trim(), customerId: finalCustomerId, serviceId: currentServiceId, customerSource: formData.clientType === 'New' ? `新客 (${formData.sourceDetail})` : (formData.clientType === 'Repeated' && !formData.customerId ? '舊客 (數位首建)' : '舊客 (Repeated)'), services: [...formData.selectedServices, formData.customService].filter(Boolean).join(', '), interests: formData.interests.join(', '), isProfileOnly: false, timestamp: getHKTNow().toISOString() };
 
     setTimeout(() => {
       setRawHistoryRecords(prev => [finalRecord, ...prev]);
@@ -561,7 +568,7 @@ export default function App() {
       }
       if (data.length === 0) return triggerNotification('沒有符合條件的資料可匯出');
       const headers = Object.keys(data[0]); const csv = [headers.join(','), ...data.map(row => headers.map(h => `"${row[h]||''}"`).join(','))].join('\n');
-      const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob(["\uFEFF"+csv], { type: 'text/csv;charset=utf-8;' })); link.download = `Headline_${type}_${new Date().toISOString().split('T')[0]}.csv`; link.click();
+      const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob(["\uFEFF"+csv], { type: 'text/csv;charset=utf-8;' })); link.download = `Headline_${type}_${getHKTDateString()}.csv`; link.click();
   };
 
   const StylistCustomTooltip = ({ active, payload }) => {
@@ -607,7 +614,7 @@ export default function App() {
         <div className="flex items-center space-x-4 md:space-x-8 w-full justify-between">
           <div className="flex flex-col items-start justify-center select-none pt-1">
             <h1 className="text-2xl md:text-3xl font-bold tracking-[0.2em] leading-none text-[#4A2511] flex items-center">
-              HEADLINE <span className="text-[10px] md:text-xs font-bold text-emerald-600 tracking-normal ml-2 md:ml-3 mt-1 bg-emerald-50 px-1.5 md:px-2 py-0.5 rounded border border-emerald-200">v14.8 Mobile</span>
+              HEADLINE <span className="text-[10px] md:text-xs font-bold text-emerald-600 tracking-normal ml-2 md:ml-3 mt-1 bg-emerald-50 px-1.5 md:px-2 py-0.5 rounded border border-emerald-200">v14.9 Mobile</span>
             </h1>
             <span className="text-[10px] md:text-xs tracking-[0.4em] uppercase mt-1 font-semibold text-gray-500">Hair Salon</span>
           </div>
@@ -836,16 +843,16 @@ export default function App() {
                   </div>
 
                   <div className="mt-2 md:mt-4 pt-4 border-t border-gray-100">
-                     <div className="bg-[#F6EFE9]/50 p-3 md:p-4 rounded-2xl border border-[#E8DCC8]">
-                        <label className="flex items-start gap-2 md:gap-3 cursor-pointer">
-                           <input type="checkbox" checked={formData.marketingConsent === 'Opt-in'} onChange={(e) => {
-                               playAudioFeedback('click');
-                               handleInputChange('marketingConsent', e.target.checked ? 'Opt-in' : 'Opt-out');
-                               handleInputChange('consentTimestamp', new Date().toISOString());
-                           }} className="mt-1 w-4 h-4 md:w-5 md:h-5 rounded text-[#8B5A2B] focus:ring-[#8B5A2B]" />
-                           <span className="text-xs md:text-sm font-bold text-gray-600 leading-snug">
-                              我同意接收 Headline Hair Salon 的最新優惠、護髮資訊及生日禮遇通知（可隨時取消）。
-                           </span>
+                 <div className="bg-[#F6EFE9]/50 p-3 md:p-4 rounded-2xl border border-[#E8DCC8]">
+                    <label className="flex items-start gap-2 md:gap-3 cursor-pointer">
+                       <input type="checkbox" checked={formData.marketingConsent === 'Opt-in'} onChange={(e) => {
+                           playAudioFeedback('click');
+                           handleInputChange('marketingConsent', e.target.checked ? 'Opt-in' : 'Opt-out');
+                           handleInputChange('consentTimestamp', getHKTNow().toISOString());
+                       }} className="mt-1 w-4 h-4 md:w-5 md:h-5 rounded text-[#8B5A2B] focus:ring-[#8B5A2B]" />
+                       <span className="text-xs md:text-sm font-bold text-gray-600 leading-snug">
+                          我同意接收 Headline Hair Salon 的最新優惠、護髮資訊及生日禮遇通知（可隨時取消）。
+                       </span>
                         </label>
                      </div>
                   </div>
@@ -1205,17 +1212,21 @@ export default function App() {
         {activeTab === 'dashboard' && (
           <div className="max-w-[1500px] mx-auto space-y-6 md:space-y-8 animate-in fade-in duration-300 pb-10">
             <div className="bg-white border border-[#E8DCC8] rounded-2xl md:rounded-3xl p-5 md:p-8 shadow-sm flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 xl:gap-6">
-               <h2 className="text-2xl md:text-3xl lg:text-4xl font-black flex items-center space-x-2 md:space-x-4 text-[#4A2511]">
-                  <div className="w-2 md:w-3 h-8 md:h-12 rounded-full bg-[#8B5A2B]"></div>
+               <h2 className="text-2xl md:text-3xl lg:text-4xl font-black flex flex-wrap items-center gap-2 md:gap-4 text-[#4A2511]">
+                  <div className="w-2 md:w-3 h-8 md:h-12 rounded-full bg-[#8B5A2B] shrink-0"></div>
                   <span>營業數據儀表板</span>
-                  <span className="text-[10px] md:text-sm font-bold bg-[#F6EFE9] text-[#8B5A2B] px-2 md:px-3 py-1 rounded-lg md:rounded-xl ml-2 md:ml-4 tracking-wider md:tracking-widest">{dashboardData.start.toLocaleDateString('zh-HK')} - {dashboardData.end.toLocaleDateString('zh-HK')}</span>
+                  <span className="text-[10px] md:text-sm font-bold bg-[#F6EFE9] text-[#8B5A2B] px-2 md:px-3 py-1 rounded-lg md:rounded-xl tracking-wider md:tracking-widest">{dashboardData.start.toLocaleDateString('zh-HK')} - {dashboardData.end.toLocaleDateString('zh-HK')}</span>
+                  <select value={dashboardGlobalStylist} onChange={(e) => setDashboardGlobalStylist(e.target.value)} className="bg-gray-50 border border-gray-200 text-[#4A2511] font-bold py-1 px-2 md:py-1.5 md:px-3 rounded-lg md:rounded-xl text-xs md:text-sm outline-none cursor-pointer focus:border-[#8B5A2B]">
+                      <option value="All">All Stylists</option>
+                      {stylists.filter(s=>s!=='Others').map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
                </h2>
                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 md:gap-3 w-full xl:w-auto">
                    <div className="flex bg-[#F6EFE9] rounded-xl md:rounded-2xl p-1 md:p-1.5 min-h-[48px] md:min-h-[64px] border border-[#E8DCC8] justify-between sm:justify-start">
                      <button onClick={() => handlePeriodChange(-1)} className="px-2 md:px-4 text-gray-400 hover:text-[#4A2511] transition-colors"><Icons.ChevronLeft /></button>
                      <div className="flex flex-1 justify-center sm:justify-start overflow-x-auto hide-scrollbar">
                        {['day', 'week', 'month', 'year', 'custom'].map(p => (
-                         <button key={p} onClick={() => { playAudioFeedback('click'); setDashboardPeriod(p); setDashboardDateRef(new Date()); setDashboardStartDate(''); setDashboardEndDate(''); }} className={`px-3 md:px-6 py-2 rounded-lg md:rounded-xl text-sm md:text-xl font-bold capitalize transition-all whitespace-nowrap ${dashboardPeriod === p ? 'bg-[#8B5A2B] text-white shadow-md' : 'text-gray-500 hover:bg-white/50'}`}>{p === 'day' ? '今日' : p === 'week' ? '本週' : p === 'month' ? '本月' : p === 'year' ? '全年' : '自訂'}</button>
+                         <button key={p} onClick={() => { playAudioFeedback('click'); setDashboardPeriod(p); setDashboardDateRef(getHKTNow()); setDashboardStartDate(''); setDashboardEndDate(''); }} className={`px-3 md:px-6 py-2 rounded-lg md:rounded-xl text-sm md:text-xl font-bold capitalize transition-all whitespace-nowrap ${dashboardPeriod === p ? 'bg-[#8B5A2B] text-white shadow-md' : 'text-gray-500 hover:bg-white/50'}`}>{p === 'day' ? '今日' : p === 'week' ? '本週' : p === 'month' ? '本月' : p === 'year' ? '全年' : '自訂'}</button>
                        ))}
                      </div>
                      <button onClick={() => handlePeriodChange(1)} className="px-2 md:px-4 text-gray-400 hover:text-[#4A2511] transition-colors"><Icons.ChevronRight /></button>
@@ -1455,7 +1466,7 @@ export default function App() {
                       <div className="flex flex-col sm:flex-row gap-3 md:gap-4">
                           <button onClick={() => {
                              const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(rawHistoryRecords));
-                             const dlAnchorElem = document.createElement('a'); dlAnchorElem.setAttribute("href", dataStr); dlAnchorElem.setAttribute("download", `Headline_Backup_${new Date().toISOString().split('T')[0]}.json`); dlAnchorElem.click(); triggerNotification('✅ JSON 備份已下載');
+                             const dlAnchorElem = document.createElement('a'); dlAnchorElem.setAttribute("href", dataStr); dlAnchorElem.setAttribute("download", `Headline_Backup_${getHKTDateString()}.json`); dlAnchorElem.click(); triggerNotification('✅ JSON 備份已下載');
                           }} className="flex-1 bg-blue-50 border border-blue-200 text-blue-600 font-bold py-3 rounded-xl flex justify-center items-center gap-2 hover:bg-blue-100 transition-colors text-sm md:text-base"><span className="text-lg">⬆️</span> 匯出 JSON</button>
                           
                           <label className="flex-1 bg-emerald-50 border border-emerald-200 text-emerald-600 font-bold py-3 rounded-xl flex justify-center items-center gap-2 hover:bg-emerald-100 cursor-pointer transition-colors text-sm md:text-base">
@@ -1700,7 +1711,7 @@ export default function App() {
           <form onSubmit={(e) => {
             e.preventDefault(); const newFullName = (e.target as any).fullName.value.trim();
             let timestampToSave = profileEditData.consentTimestamp;
-            if (profileEditData._consentChanged) timestampToSave = new Date().toISOString();
+            if (profileEditData._consentChanged) timestampToSave = getHKTNow().toISOString();
 
             updateRecordsAndSync(prev => prev.map(r => r.customerId === profileEditData.customerId ? { ...r, firstName: newFullName, lastName: '', name: newFullName, gender: (e.target as any).gender.value, language: (e.target as any).language.value, phone: (e.target as any).phone.value, interests: profileEditData.interests.join(', '), marketingConsent: profileEditData.marketingConsent, consentTimestamp: timestampToSave } : r));
             triggerNotification(`✅ 已更新檔案並同步至雲端！`); setProfileEditData(null);
