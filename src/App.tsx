@@ -393,7 +393,21 @@ export default function App() {
     const getMetrics = (start, end) => {
         const records = historyRecords.filter(r => !r.isProfileOnly && new Date(parseDateFlexible(r.date)) >= start && new Date(parseDateFlexible(r.date)) <= end && (dashboardGlobalStylist === 'All' || cleanStylistName(r.stylist) === dashboardGlobalStylist));
         let m = { rev: 0, clients: records.length, retail: 0, newCus: 0, male: 0, female: 0, en: 0, cn: 0, zh: 0 };
-        let dailyMap = {}, serviceMap = {}, stylistMap = { Man: { revenue: 0, count: 0 }, Becky: { revenue: 0, count: 0 }, Sammy: { revenue: 0, count: 0 }, Others: { revenue: 0, count: 0 } }, sourceMap = {};
+        const serviceCategoryOrder = ['Cut & Wash', 'Perm', 'Coloring', 'Treatment'];
+        const serviceCategoryByItem = {};
+        const serviceCategoryByTitle = { '剪髮與洗護 (Cut & Wash)': 'Cut & Wash', '電髮 (Perm)': 'Perm', '染髮 (Coloring)': 'Coloring', '護髮與頭皮 (Treatment)': 'Treatment' };
+        MENU_CATEGORIES.forEach(category => category.items.forEach(item => {
+            serviceCategoryByItem[item.name] = serviceCategoryByTitle[category.title];
+        }));
+        let dailyMap = {}, serviceMap = Object.fromEntries(serviceCategoryOrder.map(name => [name, { name, Man: 0, Becky: 0, Sammy: 0, Others: 0, total: 0 }])), stylistMap = { Man: { revenue: 0, count: 0 }, Becky: { revenue: 0, count: 0 }, Sammy: { revenue: 0, count: 0 }, Others: { revenue: 0, count: 0 } }, sourceMap = {};
+        const getServiceCategory = service => {
+            if (serviceCategoryByItem[service]) return serviceCategoryByItem[service];
+            if (/(染|color|bleach|漂|highlight|挑染|balayage|root|髮根|o-way|遮白)/i.test(service)) return 'Coloring';
+            if (/(護|treatment|spa|keratin|角蛋白|順髮|tokio|webond|davines|頭皮|縮毛)/i.test(service)) return 'Treatment';
+            if (/(電|perm)/i.test(service)) return 'Perm';
+            if (/(剪|cut|洗吹|wash|blow|shampoo|造型)/i.test(service)) return 'Cut & Wash';
+            return null;
+        };
         
         let globalReferralMap = {}; 
         let refTotal = 0, refRev = 0;
@@ -419,7 +433,8 @@ export default function App() {
             if (r.language === 'EN') m.en++; else m.zh++; 
             if (r.customerSource?.includes('新客')) {
                 m.newCus++;
-                let src = r.customerSource.includes('Referral') ? '朋友介紹' : (r.customerSource.includes('IG') || r.customerSource.includes('FB') ? 'IG/FB' : (r.customerSource.includes('旅客') || r.customerSource.includes('Tourist') ? '旅客' : 'Walk-in'));
+                const sourceText = `${r.customerSource || ''} ${r.sourceDetail || ''}`;
+                let src = r.customerSource.includes('Referral') ? '朋友介紹' : (r.customerSource.includes('IG') || r.customerSource.includes('FB') ? 'IG/FB' : (r.customerSource.includes('旅客') || r.customerSource.includes('Tourist') ? '旅客' : (/(google|谷歌)/i.test(sourceText) ? 'Google' : 'Walk-in')));
                 sourceMap[src] = (sourceMap[src] || 0) + 1;
             }
             const sty = ['Man', 'Becky', 'Sammy'].includes(cleanStylistName(r.stylist)) ? cleanStylistName(r.stylist) : 'Others';
@@ -432,13 +447,18 @@ export default function App() {
                 dailyMap[dateKey].count += 1; dailyMap[dateKey].revenue += r.price;
             }
 
-            (r.services || '').split(',').map(s=>s.trim()).filter(s => s && s!=='系統匯入' && s!=='建立檔案').forEach(s => {
-                if(!serviceMap[s]) serviceMap[s] = { name: s, Man: 0, Becky: 0, Sammy: 0, Others: 0, total: 0 };
-                serviceMap[s][sty] += 1; serviceMap[s].total += 1;
+            const recordServiceCategories = new Set((r.services || '').split(',')
+                .map(s => s.trim())
+                .filter(s => s && !['需要人工確認', '系統匯入', '建立檔案', '沒有記錄'].some(excluded => s.includes(excluded)))
+                .map(s => s.replace(/\s+\(\$\s*[\d,.]+\)\s*$/, '').trim())
+                .map(getServiceCategory)
+                .filter(Boolean));
+            recordServiceCategories.forEach(category => {
+                serviceMap[category][sty] += 1; serviceMap[category].total += 1;
             });
         });
         const topReferrers = Object.values(globalReferralMap).sort((a,b)=>b.count - a.count).slice(0, 5);
-        return { ...m, dailyChart: Object.values(dailyMap).sort((a,b) => a.rawDate - b.rawDate), serviceChart: Object.values(serviceMap).sort((a,b)=>b.total-a.total).slice(0,8), stylistChart: Object.keys(stylistMap).map(k => ({ name: k, ...stylistMap[k] })).sort((a,b)=>b.revenue-a.revenue), sourceChart: Object.keys(sourceMap).map(k => ({ name: k, value: sourceMap[k] })), records, referral: { totalReferred: refTotal, revenue: refRev, topReferrers } };
+        return { ...m, dailyChart: Object.values(dailyMap).sort((a,b) => a.rawDate - b.rawDate), serviceChart: serviceCategoryOrder.map(category => serviceMap[category]), stylistChart: Object.keys(stylistMap).map(k => ({ name: k, ...stylistMap[k] })).sort((a,b)=>b.revenue-a.revenue), sourceChart: Object.keys(sourceMap).map(k => ({ name: k, value: sourceMap[k] })), records, referral: { totalReferred: refTotal, revenue: refRev, topReferrers } };
     };
 
     const curr = getMetrics(currentRange.start, currentRange.end);
