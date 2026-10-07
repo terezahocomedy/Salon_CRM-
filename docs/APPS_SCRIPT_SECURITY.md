@@ -65,6 +65,15 @@ try {
 ## 5. Limitations
 Any token sent from a static GitHub Pages frontend can be read by users (DevTools, network tab), so it is only a basic barrier. For stronger protection put a serverless proxy (Cloud Run/Functions, Netlify, Vercel, Cloudflare Workers) in front of Apps Script; the proxy keeps the secret server-side and authenticates users.
 
+## 6. Onboarding devices with a setup link
+The setup link only distributes the **public** webhook URL; it is not a secret and gives no access by itself. Security is enforced in Apps Script (sections 2-4). Never put tokens in the link or the frontend.
+
+1. In **Data Hub → API 雲端串接設定**, enter the GAS URL(s) and click **複製設定連結** (copy setup link).
+2. Send the link to each stylist (or turn it into a QR code with a trusted tool). Format: `https://<site>/#setup=<encoded drive URL>&calendar=<encoded calendar URL>` (`?setup=` also works).
+3. Opening it once saves the URL(s) into that browser's `localStorage` and removes the parameters from the address bar. Only `https://script.google.com/...` URLs are accepted.
+
+Manual pasting in the settings fields still works. With no URL configured, the app sends no cloud requests. To change the URL, share a new link.
+
 ## 中文摘要
 - 前端為公開網站，網址與 token 都可被看見；網址只輸入於設定頁，不再寫死於程式碼。
 - 重新部署 GAS 取得**新網址**，停用舊部署（舊網址已在 git 歷史中，視為外洩）。

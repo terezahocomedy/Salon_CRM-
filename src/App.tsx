@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { consumeSetupParams, buildSetupLink } from './setupLink';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, CartesianGrid, Legend, ComposedChart, LabelList } from 'recharts';
+
+consumeSetupParams();
 
 const Icons = {
   Check: ({ className = "w-5 h-5" }) => <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>,
@@ -1711,6 +1714,14 @@ const trafficChartData = useMemo(() => {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
                 <div className="bg-white border border-[#E8DCC8] rounded-2xl md:rounded-3xl p-5 md:p-8 shadow-sm">
                   <h3 className="text-lg md:text-2xl font-black text-[#4A2511] mb-4 md:mb-6 border-b border-gray-100 pb-3 md:pb-4">API 雲端串接設定</h3>
+                  <div className="mb-4 md:mb-6 bg-green-50 border border-green-200 rounded-xl p-3 md:p-4">
+                    <div className="text-xs md:text-sm font-bold text-green-900 mb-1">📲 新裝置快速設定</div>
+                    <p className="text-[10px] md:text-xs text-green-800 mb-2">複製下方設定連結，傳給髮型師並在其裝置開啟一次即可，毋須手動輸入網址。此連結只包含公開的連線網址，不含任何密碼或金鑰。</p>
+                    <div className="flex gap-2">
+                      <button disabled={!buildSetupLink(driveApiUrl, calendarApiUrl)} onClick={async () => { const link = buildSetupLink(driveApiUrl, calendarApiUrl); try { await navigator.clipboard.writeText(link); triggerNotification('✅ 設定連結已複製'); } catch (e) { window.prompt('請複製設定連結', link); } }} className="bg-green-600 disabled:opacity-40 text-white font-bold px-3 py-2 rounded-lg text-xs md:text-sm">複製設定連結</button>
+                      <a href={buildSetupLink(driveApiUrl, calendarApiUrl) || undefined} target="_blank" rel="noreferrer" className={`bg-white border border-green-300 text-green-800 font-bold px-3 py-2 rounded-lg text-xs md:text-sm ${buildSetupLink(driveApiUrl, calendarApiUrl) ? '' : 'opacity-40 pointer-events-none'}`}>開啟</a>
+                    </div>
+                  </div>
                   <div className="space-y-3 md:space-y-4 mb-4 md:mb-6">
                       <div><label className="block text-xs md:text-sm font-bold text-gray-600 mb-1">CRM Google Sheet Webhook API</label><input type="text" placeholder="貼上 Apps Script 網址 (Paste Apps Script URL)" value={driveApiUrl} onChange={(e) => setDriveApiUrl(e.target.value)} className="w-full bg-blue-50 border-blue-200 border rounded-xl py-2 md:py-3 px-3 md:px-4 text-[10px] md:text-sm font-mono outline-none text-blue-900" /></div>
                       <div><label className="block text-xs md:text-sm font-bold text-gray-600 mb-1">Google Calendar Webhook API</label><input type="text" placeholder="貼上 Apps Script 網址 (Paste Apps Script URL)" value={calendarApiUrl} onChange={(e) => setCalendarApiUrl(e.target.value)} className="w-full bg-yellow-50 border-yellow-200 border rounded-xl py-2 md:py-3 px-3 md:px-4 text-[10px] md:text-sm font-mono outline-none text-yellow-900" /></div>
