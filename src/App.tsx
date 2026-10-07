@@ -174,8 +174,8 @@ export default function App() {
   const [trafficFilterStylist, setTrafficFilterStylist] = useState('All');
   const [transactionSortOrder, setTransactionSortOrder] = useState('desc');
 
-  const [driveApiUrl, setDriveApiUrl] = useState(() => localStorage.getItem('headline_drive_api_v13_9') || 'https://script.google.com/macros/s/AKfycbxCv4qRXnzrAimYoRfI1fwJLqM4P9NfyAAumRalugmgUhTs0eKEop3Z712JKET8rIgbKQ/exec');
-  const [calendarApiUrl, setCalendarApiUrl] = useState(() => localStorage.getItem('headline_calendar_api_v13_9') || 'https://script.google.com/macros/s/AKfycbwcxZHp2p19GyIew9o0WRz9w8hIMSDu1qJIoJgStMX6tKez7PIK2dGohoPvrl7WVwj9qw/exec');
+  const [driveApiUrl, setDriveApiUrl] = useState(() => localStorage.getItem('headline_drive_api_v13_9') || '');
+  const [calendarApiUrl, setCalendarApiUrl] = useState(() => localStorage.getItem('headline_calendar_api_v13_9') || '');
   
   const [calendarEvents, setCalendarEvents] = useState([]);
   const [isCalendarLoading, setIsCalendarLoading] = useState(false);
@@ -1712,8 +1712,9 @@ const trafficChartData = useMemo(() => {
                 <div className="bg-white border border-[#E8DCC8] rounded-2xl md:rounded-3xl p-5 md:p-8 shadow-sm">
                   <h3 className="text-lg md:text-2xl font-black text-[#4A2511] mb-4 md:mb-6 border-b border-gray-100 pb-3 md:pb-4">API 雲端串接設定</h3>
                   <div className="space-y-3 md:space-y-4 mb-4 md:mb-6">
-                      <div><label className="block text-xs md:text-sm font-bold text-gray-600 mb-1">CRM Google Sheet Webhook API</label><input type="text" value={driveApiUrl} onChange={(e) => setDriveApiUrl(e.target.value)} className="w-full bg-blue-50 border-blue-200 border rounded-xl py-2 md:py-3 px-3 md:px-4 text-[10px] md:text-sm font-mono outline-none text-blue-900" /></div>
-                      <div><label className="block text-xs md:text-sm font-bold text-gray-600 mb-1">Google Calendar Webhook API</label><input type="text" value={calendarApiUrl} onChange={(e) => setCalendarApiUrl(e.target.value)} className="w-full bg-yellow-50 border-yellow-200 border rounded-xl py-2 md:py-3 px-3 md:px-4 text-[10px] md:text-sm font-mono outline-none text-yellow-900" /></div>
+                      <div><label className="block text-xs md:text-sm font-bold text-gray-600 mb-1">CRM Google Sheet Webhook API</label><input type="text" placeholder="貼上 Apps Script 網址 (Paste Apps Script URL)" value={driveApiUrl} onChange={(e) => setDriveApiUrl(e.target.value)} className="w-full bg-blue-50 border-blue-200 border rounded-xl py-2 md:py-3 px-3 md:px-4 text-[10px] md:text-sm font-mono outline-none text-blue-900" /></div>
+                      <div><label className="block text-xs md:text-sm font-bold text-gray-600 mb-1">Google Calendar Webhook API</label><input type="text" placeholder="貼上 Apps Script 網址 (Paste Apps Script URL)" value={calendarApiUrl} onChange={(e) => setCalendarApiUrl(e.target.value)} className="w-full bg-yellow-50 border-yellow-200 border rounded-xl py-2 md:py-3 px-3 md:px-4 text-[10px] md:text-sm font-mono outline-none text-yellow-900" /></div>
+                      <p className="text-[10px] md:text-xs text-gray-500">請將 Google Apps Script 部署網址貼到上方欄位 (Paste your Apps Script web app URL above). 網址只儲存在此裝置。</p>
                   </div>
                   <div className="flex flex-col sm:flex-row gap-3 md:gap-4">
                       <button onClick={() => setConfirmDialog({ title: '強制上傳備份', message: '這將會把目前系統內的所有資料強制覆蓋到 Google Sheet 雲端。確定繼續嗎？', onConfirm: async () => {

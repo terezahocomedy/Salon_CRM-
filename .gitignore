@@ -1,2 +1,8 @@
 node_modules
 dist
+
+# Backups / data exports / env
+*.backup.json
+Headline_Backup_*.json
+*.csv
+.env*
