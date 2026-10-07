@@ -75,6 +75,19 @@ const getFullName = (record) => record ? `${record.firstName || ''} ${record.las
 const parsePriceRobust = (val) => val ? (isNaN(Number(String(val).replace(/[^0-9.-]+/g, ""))) ? 0 : Number(String(val).replace(/[^0-9.-]+/g, ""))) : 0;
 const cleanStylistName = (name) => name ? String(name).trim() : 'Others';
 const cleanPhone = (phone) => String(phone || '').replace(/\D/g, '');
+const PHONE_MIN_LENGTH = 8;
+const isValidPhone = (phone) => cleanPhone(phone).length >= PHONE_MIN_LENGTH;
+const isTempId = (id) => /^TEMP-\d+$/i.test(String(id || ''));
+const isRealId = (id) => /^C\d+$/.test(String(id || ''));
+const sameCustomerId = (a, b) => String(a || '').toUpperCase() === String(b || '').toUpperCase();
+const getRecordProfileKey = (r) => r.customerId ? String(r.customerId).toUpperCase() : getFullName(r).toLowerCase();
+const getProfileKey = (p) => p.customerId ? String(p.customerId).toUpperCase() : String(p.fullName || '').toLowerCase();
+const replaceReferralId = (r, oldId, newId) => {
+  if (!oldId || !r.referredBy || !String(r.referredBy).trim()) return r;
+  const escaped = String(oldId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const next = String(r.referredBy).replace(new RegExp(`(^|[^A-Za-z0-9-])${escaped}(?![A-Za-z0-9])`, 'gi'), `$1${newId}`);
+  return next === r.referredBy ? r : { ...r, referredBy: next };
+};
 
 const MENU_CATEGORIES = [
   {
@@ -151,6 +164,8 @@ export default function App() {
   const [showNameSuggest, setShowNameSuggest] = useState(false);
   const [nameSuggests, setNameSuggests] = useState([]);
   const [duplicatePhonePrompt, setDuplicatePhonePrompt] = useState(null);
+  const [showDuplicates, setShowDuplicates] = useState(false);
+  const [dupKeepSelection, setDupKeepSelection] = useState({});
   
   const [dashboardGlobalStylist, setDashboardGlobalStylist] = useState('All');
   const [trafficFilterStylist, setTrafficFilterStylist] = useState('All');
@@ -259,8 +274,20 @@ export default function App() {
   };
 
   const getNextCustomerId = (records) => {
-    const ids = records.filter(r => r.customerId && r.customerId.startsWith('C')).map(r => parseInt(r.customerId.replace('C', ''), 10)).filter(n => !isNaN(n));
+    const ids = records.filter(r => isRealId(r.customerId)).map(r => parseInt(String(r.customerId).replace('C', ''), 10)).filter(n => !isNaN(n));
     return `C${ids.length > 0 ? Math.max(...ids) + 1 : 1000}`;
+  };
+
+  const getNextTempId = (records) => {
+    const nums = records.filter(r => isTempId(r.customerId)).map(r => parseInt(String(r.customerId).replace(/\D/g, ''), 10)).filter(n => !isNaN(n));
+    return `TEMP-${String(nums.length > 0 ? Math.max(...nums) + 1 : 1).padStart(3, '0')}`;
+  };
+
+  const getCheckoutCustomerId = (form, records) => {
+    const hasPhone = isValidPhone(form.phone);
+    if (form.clientType === 'New' || !form.customerId) return hasPhone ? getNextCustomerId(records) : getNextTempId(records);
+    if (isTempId(form.customerId) && hasPhone) return getNextCustomerId(records);
+    return form.customerId;
   };
 
   const triggerNotification = (msg) => { setNotification(msg); setTimeout(() => setNotification(null), 3000); };
@@ -298,13 +325,42 @@ export default function App() {
 
   const handlePhoneBlur = (e) => {
     const val = cleanPhone(e.target.value);
-    if(val.length < 5) return;
-    const currentCustomerId = formData.clientType === 'New' || !formData.customerId ? getNextCustomerId(rawHistoryRecords) : formData.customerId;
-    const existing = crmProfiles.find(p => cleanPhone(p.phone) === val && p.customerId !== currentCustomerId);
+    if(val.length < PHONE_MIN_LENGTH) return;
+    const currentCustomerId = formData.clientType === 'New' || !formData.customerId ? '' : formData.customerId;
+    const existing = crmProfiles.find(p => cleanPhone(p.phone) === val && !sameCustomerId(p.customerId, currentCustomerId));
     if(existing) {
         playAudioFeedback('warn');
-        setDuplicatePhonePrompt(existing);
+        setDuplicatePhonePrompt({ ...existing, _context: 'checkout', _sourceId: currentCustomerId });
     }
+  };
+
+  const mergeProfiles = (keep, others) => {
+    const all = [keep, ...others];
+    const allKeys = new Set(all.map(getProfileKey));
+    const targetId = keep.customerId || '';
+    const pick = (field) => keep[field] || (others.find(o => o[field]) || {})[field] || '';
+    const mergedInterests = [];
+    all.forEach(pr => (pr.interests || []).forEach(i => { if (i && !mergedInterests.includes(i)) mergedInterests.push(i); }));
+    const oldIds = others.map(o => o.customerId).filter(id => id && !sameCustomerId(id, targetId));
+    const fields = { customerId: targetId, firstName: keep.fullName, lastName: '', name: keep.fullName, phone: pick('phone'), gender: keep.gender, language: keep.language, interests: mergedInterests.join(', '), marketingConsent: keep.marketingConsent, consentTimestamp: pick('consentTimestamp') };
+    updateRecordsAndSync(prev => prev.map(r => {
+      let next = allKeys.has(getRecordProfileKey(r)) ? { ...r, ...fields } : r;
+      oldIds.forEach(id => { next = replaceReferralId(next, id, targetId); });
+      return next;
+    }));
+    return fields;
+  };
+
+  const rankProfiles = (list) => [...list].sort((a, b) => (isRealId(b.customerId) ? 1 : 0) - (isRealId(a.customerId) ? 1 : 0) || (isTempId(b.customerId) ? 1 : 0) - (isTempId(a.customerId) ? 1 : 0) || b.visitCount - a.visitCount);
+
+  const confirmMergeProfiles = (group, keepKey, onDone) => {
+    const keep = group.find(p => getProfileKey(p) === keepKey) || group[0];
+    const others = group.filter(p => p !== keep);
+    setConfirmDialog({
+      title: '合併重複客戶 (Merge)',
+      message: `將保留：${keep.fullName} (ID: ${keep.customerId || '無'})\n並合併：${others.map(o => `${o.fullName} (ID: ${o.customerId || '無'})`).join('、')}\n\n所有消費紀錄與照片會歸入保留的檔案，此操作無法復原。確定合併嗎？`,
+      onConfirm: () => { const fields = mergeProfiles(keep, others); triggerNotification(`✅ 已合併客戶檔案並同步 (${keep.fullName})`); if (onDone) onDone(fields); }
+    });
   };
 
   const crmProfiles = useMemo(() => {
@@ -376,6 +432,28 @@ export default function App() {
   }, [historyRecords, crmSortBy]);
 
   const currentProfile = useMemo(() => { if (!formData.customerId) return null; return crmProfiles.find(p => p.customerId === formData.customerId) || null; }, [formData.customerId, crmProfiles]);
+
+  const duplicateGroups = useMemo(() => {
+    const parent = crmProfiles.map((_, i) => i);
+    const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+    const union = (a, b) => { parent[find(a)] = find(b); };
+    const byPhone = {}; const byName = {};
+    crmProfiles.forEach((p, i) => {
+      const ph = cleanPhone(p.phone);
+      if (ph.length >= PHONE_MIN_LENGTH) { if (byPhone[ph] !== undefined) union(i, byPhone[ph]); else byPhone[ph] = i; }
+      const nm = String(p.fullName || '').trim().toLowerCase();
+      if (nm.length > 1 && nm !== 'unknown') (byName[nm] = byName[nm] || []).push(i);
+    });
+    Object.values(byName).forEach((idxs: any) => {
+      for (let a = 0; a < idxs.length; a++) for (let b = a + 1; b < idxs.length; b++) {
+        const pa = cleanPhone(crmProfiles[idxs[a]].phone), pb = cleanPhone(crmProfiles[idxs[b]].phone);
+        if ((!pa || !pb || pa === pb) && getProfileKey(crmProfiles[idxs[a]]) !== getProfileKey(crmProfiles[idxs[b]])) union(idxs[a], idxs[b]);
+      }
+    });
+    const groups = {};
+    crmProfiles.forEach((p, i) => { const r = find(i); (groups[r] = groups[r] || []).push(p); });
+    return Object.values(groups).filter((g: any) => g.length > 1).map((g: any) => rankProfiles(g));
+  }, [crmProfiles]);
 
   const dashboardData = useMemo(() => {
     const getPeriodRange = (p, date, off) => {
@@ -507,6 +585,10 @@ const trafficChartData = useMemo(() => {
 
   const handleSaveCalendarEvent = async (e) => {
     e.preventDefault();
+    if (isValidPhone(schedAddEditModal.phone)) {
+      const phoneOwner = crmProfiles.find(p => cleanPhone(p.phone) === cleanPhone(schedAddEditModal.phone) && String(p.fullName || '').trim().toLowerCase() !== String(schedAddEditModal.clientName || '').trim().toLowerCase());
+      if (phoneOwner) { playAudioFeedback('warn'); setDuplicatePhonePrompt({ ...phoneOwner, _context: 'scheduler', _sourceId: '' }); return; }
+    }
     if (checkConflict(schedAddEditModal.stylist, schedAddEditModal.date, schedAddEditModal.time, schedAddEditModal.duration, schedAddEditModal.id)) { playAudioFeedback('warn'); triggerNotification('⚠️ 警告：該時段已有預約，將強行排入！'); }
     const [hour, min] = schedAddEditModal.time.split(':'); const start = new Date(schedAddEditModal.date); start.setHours(parseInt(hour, 10), parseInt(min, 10), 0); const end = new Date(start.getTime() + (parseInt(schedAddEditModal.duration) || 60) * 60 * 1000);
     const fakeId = schedAddEditModal.id || ('evt_' + Date.now());
@@ -627,16 +709,18 @@ const trafficChartData = useMemo(() => {
     if (!formData.price || parseInt(formData.price) <= 0) return triggerNotification('請輸入有效金額！');
     if (isUploadingPhoto) { playAudioFeedback('warn'); return triggerNotification('⏳ 圖片上傳中，請稍候再儲存或先取消上傳！'); }
     
-    const finalCustomerId = formData.clientType === 'New' || !formData.customerId ? getNextCustomerId(rawHistoryRecords) : formData.customerId;
+    const finalCustomerId = getCheckoutCustomerId(formData, rawHistoryRecords);
+    const currentCustomerId = formData.clientType === 'New' || !formData.customerId ? '' : formData.customerId;
     const cleanInputPhone = cleanPhone(formData.phone);
-    if (cleanInputPhone.length >= 5) {
-        const existingPhone = crmProfiles.find(p => cleanPhone(p.phone) === cleanInputPhone && p.customerId !== finalCustomerId);
+    if (cleanInputPhone.length >= PHONE_MIN_LENGTH) {
+        const existingPhone = crmProfiles.find(p => cleanPhone(p.phone) === cleanInputPhone && !sameCustomerId(p.customerId, currentCustomerId));
         if (existingPhone) {
             playAudioFeedback('warn');
-            setDuplicatePhonePrompt(existingPhone);
+            setDuplicatePhonePrompt({ ...existingPhone, _context: 'checkout', _sourceId: currentCustomerId });
             return;
         }
     }
+    const upgradeFromId = isTempId(currentCustomerId) && finalCustomerId !== currentCustomerId ? currentCustomerId : '';
 
     setSubmitting(true);
     const currentServiceId = formData.serviceId || generateServiceId(formData.date, safeRawRecords);
@@ -647,8 +731,9 @@ const trafficChartData = useMemo(() => {
     const finalRecord = { ...formData, firstName: formData.firstName.trim(), lastName: '', name: formData.firstName.trim(), customerId: finalCustomerId, serviceId: currentServiceId, customerSource: formData.clientType === 'New' ? `新客 (${formData.sourceDetail})` : (formData.clientType === 'Repeated' && !formData.customerId ? '舊客 (數位首建)' : '舊客 (Repeated)'), services: [...formattedSelectedServices, formattedCustomService].filter(Boolean).join(', '), interests: formData.interests.join(', '), isProfileOnly: false, timestamp: getHKTNow().toISOString() };
 
     setTimeout(() => {
-      setRawHistoryRecords(prev => [finalRecord, ...prev]);
-      if (driveApiUrl) fetch(getApiUrl(driveApiUrl, 'append'), { method: 'POST', body: JSON.stringify({ action: 'append', record: finalRecord }), headers: { 'Content-Type': 'text/plain;charset=utf-8' } }).catch(()=>{});
+      if (upgradeFromId) updateRecordsAndSync(prev => [finalRecord, ...prev.map(r => sameCustomerId(r.customerId, upgradeFromId) ? { ...r, customerId: finalCustomerId } : replaceReferralId(r, upgradeFromId, finalCustomerId))]);
+      else setRawHistoryRecords(prev => [finalRecord, ...prev]);
+      if (!upgradeFromId && driveApiUrl) fetch(getApiUrl(driveApiUrl, 'append'), { method: 'POST', body: JSON.stringify({ action: 'append', record: finalRecord }), headers: { 'Content-Type': 'text/plain;charset=utf-8' } }).catch(()=>{});
       if (formData._eventId && calendarApiUrl) fetch(getApiUrl(calendarApiUrl, 'delete_event'), { method: 'POST', body: JSON.stringify({ action: 'delete_event', eventId: formData._eventId }), headers: { 'Content-Type': 'text/plain;charset=utf-8' } }).catch(()=>{});
       setSubmitting(false); playAudioFeedback('cashier'); setShowSuccessModal(true); setFormData(getInitialForm());
     }, 400); 
@@ -711,7 +796,7 @@ const trafficChartData = useMemo(() => {
         <div className="flex items-center space-x-4 md:space-x-8 w-full justify-between">
           <div className="flex flex-col items-start justify-center select-none pt-1">
             <h1 className="text-2xl md:text-3xl font-bold tracking-[0.2em] leading-none text-[#4A2511] flex items-center">
-              HEADLINE <span className="text-[10px] md:text-xs font-bold text-emerald-600 tracking-normal ml-2 md:ml-3 mt-1 bg-emerald-50 px-1.5 md:px-2 py-0.5 rounded border border-emerald-200">v14.11 Mobile</span>
+              HEADLINE <span className="text-[10px] md:text-xs font-bold text-emerald-600 tracking-normal ml-2 md:ml-3 mt-1 bg-emerald-50 px-1.5 md:px-2 py-0.5 rounded border border-emerald-200">v14.12 Mobile</span>
             </h1>
             <span className="text-[10px] md:text-xs tracking-[0.4em] uppercase mt-1 font-semibold text-gray-500">Hair Salon</span>
           </div>
@@ -1029,7 +1114,7 @@ const trafficChartData = useMemo(() => {
                         </div>
                         <div className="w-full sm:w-[120px] flex flex-col shrink-0 mt-2 sm:mt-0">
                            <label className="block text-[10px] md:text-xs font-bold uppercase tracking-wider mb-1 md:mb-2 text-gray-500">Client ID</label>
-                           <input type="text" value={formData.clientType === 'New' ? getNextCustomerId(rawHistoryRecords) : formData.customerId} readOnly={formData.clientType === 'New'} onChange={(e) => handleInputChange('customerId', e.target.value.toUpperCase())} className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-2 md:py-3 px-2 text-base md:text-xl font-bold text-center font-mono outline-none focus:bg-white" />
+                           <input type="text" value={formData.clientType === 'New' || formData.customerId ? getCheckoutCustomerId(formData, rawHistoryRecords) : ''} placeholder={getCheckoutCustomerId(formData, rawHistoryRecords)} readOnly={formData.clientType === 'New' || isTempId(formData.customerId)} onChange={(e) => handleInputChange('customerId', e.target.value.toUpperCase())} className="w-full bg-gray-50 border border-gray-200 rounded-2xl py-2 md:py-3 px-2 text-base md:text-xl font-bold text-center font-mono outline-none focus:bg-white" />
                         </div>
                    </div>
 
@@ -1209,6 +1294,7 @@ const trafficChartData = useMemo(() => {
                     <button onClick={() => setCrmViewMode('list')} className={`px-2 py-1.5 md:px-4 md:py-2 rounded-lg md:rounded-xl flex items-center transition-all ${crmViewMode === 'list' ? 'bg-white shadow-sm text-[#4A2511]' : 'text-gray-400 hover:text-gray-600'}`}><Icons.List /></button>
                   </div>
 
+                  {duplicateGroups.length > 0 && <button onClick={() => { playAudioFeedback('warn'); setShowDuplicates(true); }} className="bg-amber-50 border border-amber-300 text-amber-700 px-3 py-2 md:px-4 md:py-3 rounded-xl md:rounded-2xl flex items-center gap-1 md:gap-2 font-bold shadow-sm hover:bg-amber-100 transition-colors text-xs md:text-sm w-full md:w-auto justify-center mt-2 md:mt-0">⚠️ 發現重複客戶 ({duplicateGroups.length})</button>}
                   <button onClick={() => exportCSV('marketing')} className="bg-blue-50 border border-blue-200 text-blue-600 px-3 py-2 md:px-4 md:py-3 rounded-xl md:rounded-2xl flex items-center gap-1 md:gap-2 font-bold shadow-sm hover:bg-blue-100 transition-colors text-xs md:text-sm w-full md:w-auto justify-center mt-2 md:mt-0">
                       <span className="text-lg">⬆️</span> 匯出宣傳廣播名單
                   </button>
@@ -1555,7 +1641,7 @@ const trafficChartData = useMemo(() => {
                                  <div className="col-span-2 flex items-center gap-1.5 md:gap-2 font-black text-[#8B5A2B] text-base md:text-lg">
                                     <span className={`text-[9px] md:text-[11px] font-bold w-5 h-5 md:w-6 md:h-6 flex items-center justify-center rounded-full border ${genderColor} shrink-0`}>{genderText}</span>
                                     <div className="flex flex-col min-w-0">
-                                        <span className="truncate leading-tight">{r.firstName}</span>
+                                        <span className="flex items-center gap-1.5 min-w-0"><span className="truncate leading-tight">{r.firstName}</span>{(String(r.customerSource || '').includes('新客') || r.clientType === 'New') && <span className="shrink-0 text-[9px] md:text-[11px] font-bold px-1.5 py-0.5 rounded-full border bg-emerald-100 text-emerald-700 border-emerald-200">新客</span>}</span>
                                         {customerPhone && <span className="text-[9px] md:text-[11px] font-mono text-gray-400 leading-tight font-normal mt-0.5">{customerPhone}</span>}
                                     </div>
                                  </div>
@@ -1678,8 +1764,58 @@ const trafficChartData = useMemo(() => {
               規則限制：一組號碼只能對應一位顧客。要直接載入這位舊顧客的資料嗎？
             </p>
             <div className="flex flex-col gap-2 md:gap-3">
-               <button onClick={() => { handleSelectSuggest(duplicatePhonePrompt); setDuplicatePhonePrompt(null); }} className="w-full py-3 md:py-3.5 rounded-xl font-black bg-[#8B5A2B] text-white shadow-md hover:bg-[#6D3A14] transition-colors text-sm md:text-base">載入舊顧客資料 (Load Profile)</button>
-               <button onClick={() => { setFormData(prev => ({...prev, phone: ''})); setDuplicatePhonePrompt(null); }} className="w-full py-3 md:py-3.5 rounded-xl font-bold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors text-sm md:text-base">清除號碼，重新輸入 (Clear)</button>
+               <button onClick={() => {
+                   const existing = duplicatePhonePrompt;
+                   if (existing._context === 'profile') { setProfileEditData(existing); }
+                   else if (existing._context === 'scheduler') { setSchedAddEditModal(prev => ({ ...prev, clientName: existing.fullName, phone: existing.phone })); }
+                   else handleSelectSuggest(existing);
+                   setDuplicatePhonePrompt(null);
+               }} className="w-full py-3 md:py-3.5 rounded-xl font-black bg-[#8B5A2B] text-white shadow-md hover:bg-[#6D3A14] transition-colors text-sm md:text-base">載入舊顧客資料 (Load Profile)</button>
+               {(() => {
+                   const existing = duplicatePhonePrompt;
+                   const source = existing._sourceId ? crmProfiles.find(p => sameCustomerId(p.customerId, existing._sourceId)) : null;
+                   if (!source || existing._context === 'scheduler') return null;
+                   return <button onClick={() => {
+                       const group = rankProfiles([existing, source]);
+                       setDuplicatePhonePrompt(null);
+                       confirmMergeProfiles(group, getProfileKey(group[0]), (fields) => {
+                           if (existing._context === 'profile') setProfileEditData(null);
+                           else setFormData(prev => ({ ...prev, customerId: fields.customerId, clientType: 'Repeated', firstName: fields.firstName, phone: fields.phone }));
+                       });
+                   }} className="w-full py-3 md:py-3.5 rounded-xl font-black bg-amber-100 text-amber-800 hover:bg-amber-200 transition-colors text-sm md:text-base">合併兩個檔案 (Merge)</button>;
+               })()}
+               <button onClick={() => { const ctx = duplicatePhonePrompt._context; if (ctx === 'profile') setProfileEditData(prev => ({ ...prev, phone: '' })); else if (ctx === 'scheduler') setSchedAddEditModal(prev => ({ ...prev, phone: '' })); else setFormData(prev => ({...prev, phone: ''})); setDuplicatePhonePrompt(null); }} className="w-full py-3 md:py-3.5 rounded-xl font-bold bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors text-sm md:text-base">清除號碼，重新輸入 (Clear)</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDuplicates && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[250] p-4">
+          <div className="bg-white rounded-[2rem] max-w-2xl w-full p-6 md:p-8 shadow-2xl animate-in zoom-in-95 duration-200 relative max-h-[90vh] overflow-y-auto">
+            <button type="button" onClick={() => setShowDuplicates(false)} className="absolute top-4 md:top-6 right-4 md:right-6 text-gray-400 hover:text-gray-800"><Icons.X/></button>
+            <h3 className="text-xl md:text-2xl font-black mb-1 text-[#4A2511]">重複客戶 ({duplicateGroups.length})</h3>
+            <p className="text-gray-500 font-bold text-xs md:text-sm mb-4">選擇要保留的檔案，其餘檔案的消費紀錄將合併進去。</p>
+            {duplicateGroups.length === 0 && <p className="text-center py-6 font-bold text-gray-400">沒有重複客戶</p>}
+            <div className="space-y-4">
+              {duplicateGroups.map((group: any) => {
+                const groupId = group.map(getProfileKey).sort().join('|');
+                const keepKey = dupKeepSelection[groupId] && group.some(p => getProfileKey(p) === dupKeepSelection[groupId]) ? dupKeepSelection[groupId] : getProfileKey(group[0]);
+                return (
+                  <div key={groupId} className="border border-amber-200 bg-amber-50/50 rounded-2xl p-3 md:p-4">
+                    {group.map(p => (
+                      <label key={getProfileKey(p)} className="flex items-center gap-3 py-1.5 cursor-pointer">
+                        <input type="radio" name={`keep-${groupId}`} checked={keepKey === getProfileKey(p)} onChange={() => setDupKeepSelection(prev => ({ ...prev, [groupId]: getProfileKey(p) }))} />
+                        <span className="font-black text-[#4A2511] text-sm md:text-base">{p.fullName}</span>
+                        <span className="font-mono text-xs text-gray-500">{p.customerId || '無 ID'}</span>
+                        <span className="text-xs text-gray-500">{p.phone || '無電話'}</span>
+                        <span className="text-xs text-gray-400 ml-auto">{p.visitCount} 次 / ${p.totalSpent.toLocaleString()}</span>
+                      </label>
+                    ))}
+                    <button onClick={() => confirmMergeProfiles(group, keepKey)} className="mt-2 w-full py-2 md:py-2.5 rounded-xl font-black bg-[#8B5A2B] text-white hover:bg-[#6D3A14] transition-colors text-sm md:text-base">合併 (Merge)</button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -1864,20 +2000,47 @@ const trafficChartData = useMemo(() => {
             let timestampToSave = profileEditData.consentTimestamp;
             if (profileEditData._consentChanged) timestampToSave = getHKTNow().toISOString();
 
-            updateRecordsAndSync(prev => prev.map(r => r.customerId === profileEditData.customerId ? { ...r, firstName: newFullName, lastName: '', name: newFullName, gender: (e.target as any).gender.value, language: (e.target as any).language.value, phone: (e.target as any).phone.value, interests: profileEditData.interests.join(', '), marketingConsent: profileEditData.marketingConsent, consentTimestamp: timestampToSave } : r));
-            triggerNotification(`✅ 已更新檔案並同步至雲端！`); setProfileEditData(null);
+            const newPhone = (e.target as any).phone.value;
+            const newStylist = (e.target as any).stylist.value;
+            if (isValidPhone(newPhone)) {
+                const phoneOwner = crmProfiles.find(p => cleanPhone(p.phone) === cleanPhone(newPhone) && !sameCustomerId(p.customerId, profileEditData.customerId));
+                if (phoneOwner) { playAudioFeedback('warn'); setDuplicatePhonePrompt({ ...phoneOwner, _context: 'profile', _sourceId: profileEditData.customerId }); return; }
+            }
+            const oldId = profileEditData.customerId;
+            const upgrade = isTempId(oldId) && isValidPhone(newPhone);
+            const currentStylist = stylists.includes(profileEditData.preferredStylist) ? profileEditData.preferredStylist : 'Others';
+            let newId = oldId;
+            updateRecordsAndSync(prev => {
+                newId = upgrade ? getNextCustomerId(prev) : oldId;
+                let stylistIdx = -1; let latestDate = '1970-01-01';
+                if (newStylist !== currentStylist) {
+                    prev.forEach((r, i) => {
+                        if (!sameCustomerId(r.customerId, oldId)) return;
+                        if (stylistIdx === -1) stylistIdx = i;
+                        const d = parseDateFlexible(r.date);
+                        if (!r.isProfileOnly && d > latestDate) { latestDate = d; stylistIdx = i; }
+                    });
+                }
+                return prev.map((r, i) => {
+                    if (!sameCustomerId(r.customerId, oldId)) return upgrade ? replaceReferralId(r, oldId, newId) : r;
+                    const updated = { ...r, customerId: newId, firstName: newFullName, lastName: '', name: newFullName, gender: (e.target as any).gender.value, language: (e.target as any).language.value, phone: newPhone, interests: profileEditData.interests.join(', '), marketingConsent: profileEditData.marketingConsent, consentTimestamp: timestampToSave };
+                    return i === stylistIdx ? { ...updated, stylist: newStylist } : updated;
+                });
+            });
+            triggerNotification(upgrade ? `✅ 已更新檔案並同步！客戶編號已由 ${oldId} 更新為新編號` : `✅ 已更新檔案並同步至雲端！`); setProfileEditData(null);
           }} className="bg-white rounded-[1.5rem] md:rounded-[2rem] max-w-lg w-full p-6 md:p-8 shadow-2xl flex flex-col relative animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
             <button type="button" onClick={() => setProfileEditData(null)} className="absolute top-4 md:top-6 right-4 md:right-6 text-gray-400 hover:text-gray-800"><Icons.X/></button>
             <h3 className="text-xl md:text-3xl font-black mb-4 md:mb-6 text-[#4A2511]">編輯客戶基本資料</h3>
             <div className="space-y-3 md:space-y-4 mb-4 md:mb-6">
               <div><label className="block text-[10px] md:text-xs font-bold mb-1 text-gray-500">姓名 (Full Name)</label><input type="text" name="fullName" defaultValue={profileEditData.fullName} required className="w-full bg-[#F6EFE9] border-transparent focus:bg-white focus:border-[#8B5A2B] border-2 rounded-xl py-2.5 md:py-3 px-3 md:px-4 font-bold outline-none text-sm md:text-base" /></div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 md:gap-3">
-                <div><label className="block text-[10px] md:text-xs font-bold mb-1 text-gray-500">電話</label><input type="tel" name="phone" defaultValue={profileEditData.phone} className="w-full bg-[#F6EFE9] border-transparent focus:bg-white focus:border-[#8B5A2B] border-2 rounded-xl py-2.5 md:py-3 px-3 md:px-4 font-bold outline-none text-sm md:text-base" /></div>
+                <div><label className="block text-[10px] md:text-xs font-bold mb-1 text-gray-500">電話</label><input type="tel" name="phone" value={profileEditData.phone || ''} onChange={(e) => { const v = e.target.value; setProfileEditData(p => ({ ...p, phone: v })); }} className="w-full bg-[#F6EFE9] border-transparent focus:bg-white focus:border-[#8B5A2B] border-2 rounded-xl py-2.5 md:py-3 px-3 md:px-4 font-bold outline-none text-sm md:text-base" /></div>
                 <div className="grid grid-cols-2 gap-2">
                     <div><label className="block text-[10px] md:text-xs font-bold mb-1 text-gray-500">性別</label><select name="gender" defaultValue={profileEditData.gender} className="w-full bg-[#F6EFE9] border-transparent focus:border-[#8B5A2B] border-2 rounded-xl py-2.5 md:py-3 px-2 font-bold outline-none text-sm md:text-base"><option value="Female">女</option><option value="Male">男</option></select></div>
                     <div><label className="block text-[10px] md:text-xs font-bold mb-1 text-gray-500">語言</label><select name="language" defaultValue={profileEditData.language} className="w-full bg-[#F6EFE9] border-transparent focus:border-[#8B5A2B] border-2 rounded-xl py-2.5 md:py-3 px-2 font-bold outline-none text-sm md:text-base"><option value="中文">中文</option><option value="EN">EN</option></select></div>
                 </div>
               </div>
+              <div><label className="block text-[10px] md:text-xs font-bold mb-1 text-gray-500">設計師 (Preferred Stylist)</label><select name="stylist" defaultValue={stylists.includes(profileEditData.preferredStylist) ? profileEditData.preferredStylist : 'Others'} className="w-full bg-[#F6EFE9] border-transparent focus:border-[#8B5A2B] border-2 rounded-xl py-2.5 md:py-3 px-2 font-bold outline-none text-sm md:text-base">{stylists.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
               <div className="pt-2">
                   <label className="block text-[10px] md:text-xs font-bold mb-1.5 md:mb-2 text-gray-500">編輯標籤 (Customer Tags)</label>
                   <div className="flex flex-wrap gap-1.5 md:gap-2">
