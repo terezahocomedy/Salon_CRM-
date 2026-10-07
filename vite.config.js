@@ -3,5 +3,5 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  base: '/Salon_CRM-/',
+  base: '/Salon_CRM-V14.13M/',
 })
