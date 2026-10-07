@@ -76,6 +76,7 @@ const parsePriceRobust = (val) => val ? (isNaN(Number(String(val).replace(/[^0-9
 const cleanStylistName = (name) => name ? String(name).trim() : 'Others';
 const cleanPhone = (phone) => String(phone || '').replace(/\D/g, '');
 const PHONE_MIN_LENGTH = 8;
+const ADMIN_PASSWORD = '8888';
 const isValidPhone = (phone) => cleanPhone(phone).length >= PHONE_MIN_LENGTH;
 const isTempId = (id) => /^TEMP-\d+$/i.test(String(id || ''));
 const isRealId = (id) => /^C\d+$/.test(String(id || ''));
@@ -152,6 +153,8 @@ export default function App() {
   const [notification, setNotification] = useState(null);
   const [dataHubUnlocked, setDataHubUnlocked] = useState(false);
   const [authPassword, setAuthPassword] = useState('');
+  const [showExportAuth, setShowExportAuth] = useState(false);
+  const [exportPassword, setExportPassword] = useState('');
   
   const [editModal, setEditModal] = useState(null); 
   const [profileEditData, setProfileEditData] = useState(null);
@@ -470,7 +473,7 @@ export default function App() {
 
     const getMetrics = (start, end) => {
         const records = historyRecords.filter(r => !r.isProfileOnly && new Date(parseDateFlexible(r.date)) >= start && new Date(parseDateFlexible(r.date)) <= end && (dashboardGlobalStylist === 'All' || cleanStylistName(r.stylist) === dashboardGlobalStylist));
-        let m = { rev: 0, clients: records.length, retail: 0, newCus: 0, male: 0, female: 0, en: 0, cn: 0, zh: 0 };
+        let m = { newReturned: 0, newInPeriod: 0, rev: 0, clients: records.length, retail: 0, newCus: 0, male: 0, female: 0, en: 0, cn: 0, zh: 0 };
         const serviceCategoryOrder = ['Cut & Wash', 'Perm', 'Coloring', 'Treatment'];
         const serviceCategoryByItem = {};
         const serviceCategoryByTitle = { '剪髮與洗護 (Cut & Wash)': 'Cut & Wash', '電髮 (Perm)': 'Perm', '染髮 (Coloring)': 'Coloring', '護髮與頭皮 (Treatment)': 'Treatment' };
@@ -501,6 +504,26 @@ export default function App() {
                     globalReferralMap[refKey].count += 1; globalReferralMap[refKey].revenue += r.price;
                 }
             }
+        });
+
+        const firstVisitMap = {};
+        stylistFilteredHistory.forEach(r => {
+            if (r.isProfileOnly) return;
+            const key = r.customerId ? String(r.customerId).toUpperCase() : getFullName(r).toLowerCase();
+            const d = parseDateFlexible(r.date);
+            if (!firstVisitMap[key]) firstVisitMap[key] = { first: d, count: 0, hasLater: false };
+            const f = firstVisitMap[key];
+            f.count++;
+            if (d < f.first) f.first = d;
+        });
+        stylistFilteredHistory.forEach(r => {
+            if (r.isProfileOnly) return;
+            const f = firstVisitMap[r.customerId ? String(r.customerId).toUpperCase() : getFullName(r).toLowerCase()];
+            if (parseDateFlexible(r.date) > f.first) f.hasLater = true;
+        });
+        Object.values(firstVisitMap).forEach((f: any) => {
+            const fd = new Date(f.first);
+            if (!isNaN(fd.getTime()) && fd >= start && fd <= end) { m.newInPeriod++; if (f.count >= 2 && f.hasLater) m.newReturned++; }
         });
 
         records.forEach(r => {
@@ -552,7 +575,8 @@ export default function App() {
     
     return {
         ...curr, start: currentRange.start, end: currentRange.end, stylistChart: stylistChartWithChanges,
-        changes: prev ? { rev: calcChange(curr.rev, prev.rev), clients: calcChange(curr.clients, prev.clients), avg: calcChange(curr.clients?curr.rev/curr.clients:0, prev.clients?prev.rev/prev.clients:0), newCus: calcChange(curr.newCus, prev.newCus) } : null,
+        changes: prev ? { rev: calcChange(curr.rev, prev.rev), clients: calcChange(curr.clients, prev.clients), avg: calcChange(curr.clients?curr.rev/curr.clients:0, prev.clients?prev.rev/prev.clients:0), newCus: calcChange(curr.newCus, prev.newCus), newReturnRate: (curr.newInPeriod ? (curr.newReturned / curr.newInPeriod) * 100 : 0) - (prev.newInPeriod ? (prev.newReturned / prev.newInPeriod) * 100 : 0) } : null,
+        newReturnRate: curr.newInPeriod ? ((curr.newReturned / curr.newInPeriod) * 100).toFixed(1) : 0,
         avgSpending: curr.clients ? (curr.rev / curr.clients).toFixed(0) : 0,
         retailPct: curr.rev ? ((curr.retail / curr.rev) * 100).toFixed(1) : 0,
         malePct: curr.clients ? ((curr.male / curr.clients) * 100).toFixed(0) : 0, femalePct: curr.clients ? ((curr.female / curr.clients) * 100).toFixed(0) : 0,
@@ -739,6 +763,11 @@ const trafficChartData = useMemo(() => {
     }, 400); 
   };
 
+  const confirmExportAuth = () => {
+    if (exportPassword === ADMIN_PASSWORD) { setShowExportAuth(false); setExportPassword(''); exportCSV('transactions', dashboardData.records); }
+    else { playAudioFeedback('warn'); triggerNotification('❌ 密碼錯誤，無法匯出'); setExportPassword(''); }
+  };
+
   const exportCSV = (type, customRecords = null) => {
       let data = [];
       if (type === 'customers') {
@@ -796,7 +825,7 @@ const trafficChartData = useMemo(() => {
         <div className="flex items-center space-x-4 md:space-x-8 w-full justify-between">
           <div className="flex flex-col items-start justify-center select-none pt-1">
             <h1 className="text-2xl md:text-3xl font-bold tracking-[0.2em] leading-none text-[#4A2511] flex items-center">
-              HEADLINE <span className="text-[10px] md:text-xs font-bold text-emerald-600 tracking-normal ml-2 md:ml-3 mt-1 bg-emerald-50 px-1.5 md:px-2 py-0.5 rounded border border-emerald-200">v14.12 Mobile</span>
+              HEADLINE <span className="text-[10px] md:text-xs font-bold text-emerald-600 tracking-normal ml-2 md:ml-3 mt-1 bg-emerald-50 px-1.5 md:px-2 py-0.5 rounded border border-emerald-200">v14.13 Mobile</span>
             </h1>
             <span className="text-[10px] md:text-xs tracking-[0.4em] uppercase mt-1 font-semibold text-gray-500">Hair Salon</span>
           </div>
@@ -1487,11 +1516,12 @@ const trafficChartData = useMemo(() => {
                </div>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-6">
                <div className="border border-[#4A2511] rounded-2xl md:rounded-3xl p-4 md:p-6 shadow-lg flex flex-col justify-center" style={{ backgroundColor: '#4A2511' }}><h3 className="text-xs md:text-sm font-bold text-[#E8DCC8] mb-1 md:mb-2">總營業額</h3><p className="text-xl sm:text-2xl md:text-4xl font-black text-white">${dashboardData.rev.toLocaleString()}</p>{dashboardData.changes && <p className={`text-[10px] md:text-sm font-bold mt-1 md:mt-2 ${dashboardData.changes.rev >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{dashboardData.changes.rev >= 0 ? '▲' : '▼'} {Math.abs(dashboardData.changes.rev)}%</p>}</div>
                <div className="bg-white border border-[#E8DCC8] rounded-2xl md:rounded-3xl p-4 md:p-6 shadow-sm flex flex-col justify-center"><h3 className="text-xs md:text-sm font-bold text-gray-400 mb-1 md:mb-2">服務客數</h3><p className="text-xl sm:text-2xl md:text-4xl font-black text-[#4A2511]">{dashboardData.clients} <span className="text-sm md:text-xl text-gray-300">位</span></p>{dashboardData.changes && <p className={`text-[10px] md:text-sm font-bold mt-1 md:mt-2 ${dashboardData.changes.clients >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{dashboardData.changes.clients >= 0 ? '▲' : '▼'} {Math.abs(dashboardData.changes.clients)}%</p>}</div>
                <div className="bg-white border border-[#E8DCC8] rounded-2xl md:rounded-3xl p-4 md:p-6 shadow-sm flex flex-col justify-center"><h3 className="text-xs md:text-sm font-bold text-gray-400 mb-1 md:mb-2">平均客單價</h3><p className="text-xl sm:text-2xl md:text-4xl font-black text-[#4A2511]">${dashboardData.avgSpending.toLocaleString()}</p>{dashboardData.changes && <p className={`text-[10px] md:text-sm font-bold mt-1 md:mt-2 ${dashboardData.changes.avg >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{dashboardData.changes.avg >= 0 ? '▲' : '▼'} {Math.abs(dashboardData.changes.avg)}%</p>}</div>
                <div className="bg-white border border-[#E8DCC8] rounded-2xl md:rounded-3xl p-4 md:p-6 shadow-sm flex flex-col justify-center"><h3 className="text-xs md:text-sm font-bold text-gray-400 mb-1 md:mb-2">新客數</h3><p className="text-xl sm:text-2xl md:text-4xl font-black text-[#4A2511]">{dashboardData.newCus} <span className="text-sm md:text-xl text-gray-300">位</span></p>{dashboardData.changes && <p className={`text-[10px] md:text-sm font-bold mt-1 md:mt-2 ${dashboardData.changes.newCus >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{dashboardData.changes.newCus >= 0 ? '▲' : '▼'} {Math.abs(dashboardData.changes.newCus)}%</p>}</div>
+               <div className="bg-white border border-[#E8DCC8] rounded-2xl md:rounded-3xl p-4 md:p-6 shadow-sm flex flex-col justify-center"><h3 className="text-xs md:text-sm font-bold text-gray-400 mb-1 md:mb-2">新客回頭率</h3><p className="text-xl sm:text-2xl md:text-4xl font-black text-[#4A2511]">{dashboardData.newReturnRate}<span className="text-sm md:text-xl text-gray-300">%</span></p><p className="text-[10px] md:text-sm font-bold mt-1 md:mt-2 text-gray-500">{dashboardData.newReturned} / {dashboardData.newInPeriod} 位</p>{dashboardData.changes && <p className={`text-[10px] md:text-sm font-bold mt-1 ${dashboardData.changes.newReturnRate >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{dashboardData.changes.newReturnRate >= 0 ? '▲' : '▼'} {Math.abs(dashboardData.changes.newReturnRate).toFixed(1)}%</p>}</div>
             </div>
 
             <div className="bg-white border border-[#E8DCC8] rounded-2xl md:rounded-3xl p-4 md:p-6 shadow-sm overflow-x-auto">
@@ -1603,7 +1633,7 @@ const trafficChartData = useMemo(() => {
             <div className="bg-white border border-[#E8DCC8] rounded-2xl md:rounded-3xl shadow-sm overflow-hidden flex flex-col">
                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-4 md:p-6 bg-[#F6EFE9] border-b border-[#E8DCC8] gap-3">
                    <h3 className="text-xl md:text-2xl font-black text-[#4A2511]">交易明細總表 <span className="text-[10px] md:text-sm font-bold text-gray-500">(可點擊編輯)</span></h3>
-                   <button onClick={() => exportCSV('transactions', dashboardData.records)} className="bg-blue-50 border border-blue-200 px-3 py-2 md:px-4 md:py-2 rounded-xl text-blue-600 font-bold shadow-sm hover:bg-blue-100 flex items-center justify-center gap-1.5 md:gap-2 transition-colors text-xs md:text-sm w-full sm:w-auto"><span className="text-base">⬆️</span> 匯出目前明細</button>
+                   <button onClick={() => { playAudioFeedback('click'); setExportPassword(''); setShowExportAuth(true); }} className="bg-blue-50 border border-blue-200 px-3 py-2 md:px-4 md:py-2 rounded-xl text-blue-600 font-bold shadow-sm hover:bg-blue-100 flex items-center justify-center gap-1.5 md:gap-2 transition-colors text-xs md:text-sm w-full sm:w-auto"><span className="text-base">⬆️</span> 匯出目前明細</button>
                </div>
                <div className="w-full overflow-x-auto">
                   <div className="grid grid-cols-12 gap-2 md:gap-4 px-4 md:px-6 py-3 md:py-4 bg-[#F6EFE9]/50 border-b border-[#E8DCC8] text-[10px] md:text-sm font-black text-gray-500 tracking-wider min-w-[800px]">
@@ -1665,8 +1695,8 @@ const trafficChartData = useMemo(() => {
                    <div className="w-12 h-12 md:w-16 md:h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4 md:mb-6 text-gray-400"><Icons.Lock /></div>
                    <h3 className="text-xl md:text-2xl font-black mb-2 text-[#4A2511]">安全鎖定</h3>
                    <p className="text-xs md:text-sm font-bold text-gray-500 mb-4 md:mb-6">請輸入店長密碼以進入資料中心</p>
-                   <input type="password" placeholder="••••" value={authPassword} onChange={e=>setAuthPassword(e.target.value)} onKeyDown={e=>{if(e.key==='Enter' && authPassword==='8888'){playAudioFeedback('success');setDataHubUnlocked(true);setAuthPassword('');}}} className="w-full bg-gray-50 border rounded-xl py-3 px-4 text-center text-xl md:text-2xl tracking-widest outline-none focus:border-[#8B5A2B] mb-4" />
-                   <button onClick={()=>{if(authPassword==='8888'){setDataHubUnlocked(true);setAuthPassword('');}}} className="w-full bg-[#8B5A2B] text-white font-bold py-3 rounded-xl text-sm md:text-base">解鎖</button>
+                   <input type="password" placeholder="••••" value={authPassword} onChange={e=>setAuthPassword(e.target.value)} onKeyDown={e=>{if(e.key==='Enter' && authPassword===ADMIN_PASSWORD){playAudioFeedback('success');setDataHubUnlocked(true);setAuthPassword('');}}} className="w-full bg-gray-50 border rounded-xl py-3 px-4 text-center text-xl md:text-2xl tracking-widest outline-none focus:border-[#8B5A2B] mb-4" />
+                   <button onClick={()=>{if(authPassword===ADMIN_PASSWORD){setDataHubUnlocked(true);setAuthPassword('');}}} className="w-full bg-[#8B5A2B] text-white font-bold py-3 rounded-xl text-sm md:text-base">解鎖</button>
                </div>
            </div>
         )}
@@ -1790,9 +1820,25 @@ const trafficChartData = useMemo(() => {
         </div>
       )}
 
+      {showExportAuth && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[250] p-4" onClick={() => setShowExportAuth(false)}>
+          <div className="bg-white rounded-[2rem] max-w-sm w-full p-6 md:p-8 shadow-2xl animate-in zoom-in-95 duration-200 relative text-center" onClick={e => e.stopPropagation()}>
+            <button type="button" onClick={() => setShowExportAuth(false)} className="absolute top-4 md:top-6 right-4 md:right-6 text-gray-400 hover:text-gray-800"><Icons.X/></button>
+            <div className="w-12 h-12 md:w-16 md:h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400"><Icons.Lock /></div>
+            <h3 className="text-xl md:text-2xl font-black mb-2 text-[#4A2511]">安全鎖定</h3>
+            <p className="text-xs md:text-sm font-bold text-gray-500 mb-4">請輸入店長密碼以匯出明細表</p>
+            <input type="password" autoFocus placeholder="••••" value={exportPassword} onChange={e => setExportPassword(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') confirmExportAuth(); }} className="w-full bg-gray-50 border rounded-xl py-3 px-4 text-center text-xl md:text-2xl tracking-widest outline-none focus:border-[#8B5A2B] mb-4" />
+            <div className="flex gap-3">
+              <button type="button" onClick={() => setShowExportAuth(false)} className="flex-1 bg-gray-100 text-gray-600 font-bold py-3 rounded-xl text-sm md:text-base">取消</button>
+              <button type="button" onClick={confirmExportAuth} className="flex-1 bg-[#8B5A2B] text-white font-bold py-3 rounded-xl text-sm md:text-base">確認</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showDuplicates && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[250] p-4">
-          <div className="bg-white rounded-[2rem] max-w-2xl w-full p-6 md:p-8 shadow-2xl animate-in zoom-in-95 duration-200 relative max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[250] p-4" onClick={() => setShowDuplicates(false)}>
+          <div className="bg-white rounded-[2rem] max-w-2xl w-full p-6 md:p-8 shadow-2xl animate-in zoom-in-95 duration-200 relative max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <button type="button" onClick={() => setShowDuplicates(false)} className="absolute top-4 md:top-6 right-4 md:right-6 text-gray-400 hover:text-gray-800"><Icons.X/></button>
             <h3 className="text-xl md:text-2xl font-black mb-1 text-[#4A2511]">重複客戶 ({duplicateGroups.length})</h3>
             <p className="text-gray-500 font-bold text-xs md:text-sm mb-4">選擇要保留的檔案，其餘檔案的消費紀錄將合併進去。</p>
