@@ -7,3 +7,14 @@ html, body, #root {
   margin: 0;
   -webkit-tap-highlight-color: transparent;
 }
+
+/* Workaround: hide Netlify-injected badge/drawer (permanent fix is in Netlify dashboard) */
+#netlify-drawer,
+[id^="netlify-"],
+[class*="netlify-badge"],
+iframe[src*="netlify"],
+a[href*="netlify.com"][style*="fixed"] {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
